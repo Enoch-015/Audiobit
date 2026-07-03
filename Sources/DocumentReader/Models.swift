@@ -1,0 +1,104 @@
+import Foundation
+import UniformTypeIdentifiers
+
+struct ReadingSection: Identifiable, Codable, Hashable, Sendable {
+    let id: UUID
+    var title: String
+    var text: String
+    var pageIndex: Int?
+
+    init(id: UUID = UUID(), title: String, text: String, pageIndex: Int? = nil) {
+        self.id = id
+        self.title = title
+        self.text = text
+        self.pageIndex = pageIndex
+    }
+}
+
+struct DocumentContent: Codable, Hashable, Sendable {
+    var title: String
+    var sourceURL: URL
+    var typeIdentifier: String
+    var sections: [ReadingSection]
+    var usedOCR: Bool
+
+    var fullText: String {
+        sections.map(\.text).joined(separator: "\n\n")
+    }
+}
+
+struct RecentDocument: Identifiable, Codable, Hashable, Sendable {
+    var id: String { url.standardizedFileURL.path }
+    let url: URL
+    var lastOpened: Date
+}
+
+struct ReadingSession: Codable, Sendable {
+    var sectionIndex: Int = 0
+    var speechRate: Float = 0.5
+    var voiceIdentifier: String?
+    var speechEngine: SpeechEngineKind = .apple
+    var sidebarVisible: Bool = true
+
+    init(
+        sectionIndex: Int = 0,
+        speechRate: Float = 0.5,
+        voiceIdentifier: String? = nil,
+        speechEngine: SpeechEngineKind = .apple,
+        sidebarVisible: Bool = true
+    ) {
+        self.sectionIndex = sectionIndex
+        self.speechRate = speechRate
+        self.voiceIdentifier = voiceIdentifier
+        self.speechEngine = speechEngine
+        self.sidebarVisible = sidebarVisible
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case sectionIndex, speechRate, voiceIdentifier, speechEngine, sidebarVisible
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        sectionIndex = try values.decodeIfPresent(Int.self, forKey: .sectionIndex) ?? 0
+        speechRate = try values.decodeIfPresent(Float.self, forKey: .speechRate) ?? 0.5
+        voiceIdentifier = try values.decodeIfPresent(String.self, forKey: .voiceIdentifier)
+        speechEngine = try values.decodeIfPresent(SpeechEngineKind.self, forKey: .speechEngine) ?? .apple
+        sidebarVisible = try values.decodeIfPresent(Bool.self, forKey: .sidebarVisible) ?? true
+    }
+}
+
+enum ReaderError: LocalizedError {
+    case unsupported
+    case unreadable
+    case empty
+    case lockedPDF
+    case imageDecode
+
+    var errorDescription: String? {
+        switch self {
+        case .unsupported: "This file type is not supported yet."
+        case .unreadable: "The document could not be read."
+        case .empty: "No readable text was found in this document."
+        case .lockedPDF: "This PDF is encrypted and must be unlocked first."
+        case .imageDecode: "The image could not be decoded."
+        }
+    }
+}
+
+enum SupportedTypes {
+    static let all: [UTType] = [
+        .pdf, .plainText, .utf8PlainText, .rtf,
+        .png, .jpeg, .tiff, .heic
+    ]
+
+    static func type(for url: URL) -> UTType? {
+        UTType(filenameExtension: url.pathExtension)
+    }
+
+    static func isSupported(_ url: URL) -> Bool {
+        guard let type = type(for: url) else { return false }
+        return all.contains { type.conforms(to: $0) } ||
+            ["md", "markdown"].contains(url.pathExtension.lowercased())
+    }
+}
