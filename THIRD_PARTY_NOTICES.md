@@ -1,6 +1,6 @@
 # Third-Party Notices
 
-Document Reader optionally downloads and uses the following local speech
+Audibit uses or optionally downloads the following local speech and audio
 components. Their licenses remain with their respective authors.
 
 - **Kokoro-82M model weights** — Apache License 2.0  
@@ -16,6 +16,8 @@ components. Their licenses remain with their respective authors.
 - **Kokoro voice style assets** — distributed with the Apache-2.0-licensed
   Kokoro reference application  
   https://github.com/mlalma/KokoroTestApp
+- **LAME MP3 encoder** — GNU Lesser General Public License 2.1
+  https://lame.sourceforge.io/
 
 The application does not transmit document contents to these projects or to
 any external speech service.

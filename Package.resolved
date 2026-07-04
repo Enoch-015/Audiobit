@@ -1,6 +1,15 @@
 {
-  "originHash" : "0d836697d656398b987c50571cf91df276ed827871269f7eaf7aee96393f8339",
+  "originHash" : "712844ae392d1881fea34153c016c1cbc062e0663e06fd07bcde75d7a92ffe27",
   "pins" : [
+    {
+      "identity" : "lame-xcframework",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/BB9z/LAME-xcframework.git",
+      "state" : {
+        "revision" : "3f906714cf8a8cf2a82a8cf5bc760e639febf7b2",
+        "version" : "3.100.3"
+      }
+    },
     {
       "identity" : "mlx-swift",
       "kind" : "remoteSourceControl",

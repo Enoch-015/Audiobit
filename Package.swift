@@ -19,6 +19,10 @@ let package = Package(
         .package(
             url: "https://github.com/mlalma/MLXUtilsLibrary.git",
             exact: "0.0.5"
+        ),
+        .package(
+            url: "https://github.com/BB9z/LAME-xcframework.git",
+            exact: "3.100.3"
         )
     ],
     targets: [
@@ -50,6 +54,7 @@ let package = Package(
             dependencies: [
                 "KokoroSwift",
                 "ZIPFoundation",
+                .product(name: "LAME", package: "LAME-xcframework"),
                 .product(name: "MLX", package: "mlx-swift"),
                 .product(name: "MLXUtilsLibrary", package: "MLXUtilsLibrary")
             ],

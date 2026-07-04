@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleDisplayName</key>
-    <string>Audiobit</string>
+    <string>Audibit</string>
     <key>CFBundleExecutable</key>
     <string>DocumentReader</string>
     <key>CFBundleIdentifier</key>
@@ -11,7 +11,9 @@
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
-    <string>Audiobit</string>
+    <string>Audibit</string>
+    <key>CFBundleIconFile</key>
+    <string>Audibit.icns</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>

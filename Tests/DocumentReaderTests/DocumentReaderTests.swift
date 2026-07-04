@@ -1,5 +1,6 @@
 import Foundation
 import CryptoKit
+import AVFoundation
 import Testing
 @testable import DocumentReader
 import ZIPFoundation
@@ -68,6 +69,88 @@ import ZIPFoundation
     ]
 
     #expect(PDFDocumentExtractor.text(from: lines) == "program-ming languages")
+}
+
+@Test func audioExportUsesUniqueMP3Names() throws {
+    let root = FileManager.default.temporaryDirectory
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    let manager = ExportTestFileManager(documentsURL: root)
+    let exportDirectory = try AudioExportController.exportDirectory(fileManager: manager)
+    let first = exportDirectory.appendingPathComponent("Notes.mp3")
+    FileManager.default.createFile(atPath: first.path, contents: Data())
+
+    let candidate = try AudioExportController.destinationURL(
+        for: "Notes",
+        fileManager: manager
+    )
+    #expect(candidate.lastPathComponent == "Notes 2.mp3")
+}
+
+private final class ExportTestFileManager: FileManager, @unchecked Sendable {
+    let documentsURL: URL
+
+    init(documentsURL: URL) {
+        self.documentsURL = documentsURL
+        super.init()
+    }
+
+    override func urls(
+        for directory: FileManager.SearchPathDirectory,
+        in domainMask: FileManager.SearchPathDomainMask
+    ) -> [URL] {
+        directory == .documentDirectory ? [documentsURL] : super.urls(for: directory, in: domainMask)
+    }
+}
+
+@Test func mp3EncoderProducesPlayableMP3() async throws {
+    let root = FileManager.default.temporaryDirectory
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let source = root.appendingPathComponent("source.wav")
+    let destination = root.appendingPathComponent("result.mp3")
+    try waveFixture().write(to: source)
+
+    try await MP3Encoder.encode(source: source, destination: destination)
+
+    let data = try Data(contentsOf: destination)
+    #expect(data.count > 100)
+    #expect(data.starts(with: [0xFF, 0xF3]) || data.starts(with: [0xFF, 0xFB]))
+}
+
+private func waveFixture() -> Data {
+    let sampleRate: UInt32 = 24_000
+    let sampleCount = 4_800
+    var samples = Data(capacity: sampleCount * 2)
+    for index in 0..<sampleCount {
+        var sample = Int16(
+            sin(Float(index) * 2 * .pi * 440 / Float(sampleRate))
+                * Float(Int16.max) * 0.2
+        ).littleEndian
+        withUnsafeBytes(of: &sample) { samples.append(contentsOf: $0) }
+    }
+    var wave = Data("RIFF".utf8)
+    append(UInt32(36 + samples.count), to: &wave)
+    wave.append(Data("WAVEfmt ".utf8))
+    append(UInt32(16), to: &wave)
+    append(UInt16(1), to: &wave)
+    append(UInt16(1), to: &wave)
+    append(sampleRate, to: &wave)
+    append(sampleRate * 2, to: &wave)
+    append(UInt16(2), to: &wave)
+    append(UInt16(16), to: &wave)
+    wave.append(Data("data".utf8))
+    append(UInt32(samples.count), to: &wave)
+    wave.append(samples)
+    return wave
+}
+
+private func append<T: FixedWidthInteger>(_ value: T, to data: inout Data) {
+    var littleEndian = value.littleEndian
+    withUnsafeBytes(of: &littleEndian) { data.append(contentsOf: $0) }
 }
 
 @Test func sentenceAwareChunking() {

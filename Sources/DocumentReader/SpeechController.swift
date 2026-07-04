@@ -31,6 +31,7 @@ final class SpeechController: ObservableObject {
     private var rollingPlaybackActive = false
     private var isPreviewing = false
     private var switchTask: Task<Void, Never>?
+    private var exportRenderer: AppleOfflineRenderer?
 
     init(modelManager: KokoroModelManager = .shared) {
         self.modelManager = modelManager
@@ -161,6 +162,40 @@ final class SpeechController: ObservableObject {
             self?.speakCurrent()
         }
         fallbackMessage = nil
+    }
+
+    func renderForExport(
+        chunks: [String],
+        to destination: URL,
+        progress: @escaping @MainActor (Int, Int) -> Void
+    ) async throws {
+        let selectedEngine = engineKind
+        let selectedVoice = voiceIdentifier
+        let selectedRate = rate
+        if selectedEngine == .kokoro {
+            try await kokoroEngine.renderForExport(
+                chunks: chunks,
+                voiceIdentifier: selectedVoice,
+                rate: selectedRate,
+                destination: destination,
+                progress: progress
+            )
+        } else {
+            let renderer = AppleOfflineRenderer()
+            exportRenderer = renderer
+            defer { exportRenderer = nil }
+            try await withTaskCancellationHandler {
+                try await renderer.render(
+                    chunks: chunks,
+                    voiceIdentifier: selectedVoice,
+                    rate: selectedRate,
+                    destination: destination,
+                    progress: progress
+                )
+            } onCancel: {
+                Task { @MainActor in renderer.stop() }
+            }
+        }
     }
 
     private func rebuildChunks(startingAt sectionIndex: Int) {

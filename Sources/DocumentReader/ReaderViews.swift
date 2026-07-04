@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 
 struct RootView: View {
     @StateObject private var documents = DocumentController()
+    @StateObject private var audioExport = AudioExportController()
     @ObservedObject var speech: SpeechController
     @ObservedObject private var modelManager = KokoroModelManager.shared
     @State private var showImporter = false
@@ -27,7 +28,7 @@ struct RootView: View {
                 }
             )
         }
-        .navigationTitle(documents.content?.title ?? "Audiobit")
+        .navigationTitle(documents.content?.title ?? "Audibit")
         .toolbar {
             ToolbarItemGroup {
                 Button {
@@ -43,6 +44,21 @@ struct RootView: View {
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 190)
                         .accessibilityLabel("Search document")
+
+                    Button {
+                        if let content = documents.content {
+                            audioExport.start(content: content, speech: speech)
+                        }
+                    } label: {
+                        if audioExport.isExporting {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Label("Export Audio", systemImage: "waveform.badge.plus")
+                        }
+                    }
+                    .disabled(audioExport.isExporting)
+                    .help("Export this document as an MP3")
                 }
 
                 SettingsLink {
@@ -107,6 +123,40 @@ struct RootView: View {
         } message: {
             Text(speech.fallbackMessage ?? "")
         }
+        .sheet(isPresented: Binding(
+            get: { audioExport.isExporting },
+            set: { if !$0 { audioExport.cancel() } }
+        )) {
+            AudioExportProgressView(audioExport: audioExport)
+        }
+        .alert(
+            "Audio Export",
+            isPresented: Binding(
+                get: {
+                    if case .completed = audioExport.state { return true }
+                    if case .failed = audioExport.state { return true }
+                    return false
+                },
+                set: { if !$0 { audioExport.dismissResult() } }
+            )
+        ) {
+            if case .completed(let url) = audioExport.state {
+                Button("Show in Finder") {
+                    NSWorkspace.shared.activateFileViewerSelecting([url])
+                    audioExport.dismissResult()
+                }
+            }
+            Button("OK") { audioExport.dismissResult() }
+        } message: {
+            switch audioExport.state {
+            case .completed(let url):
+                Text("Saved to \(url.path)")
+            case .failed(let message):
+                Text(message)
+            default:
+                EmptyView()
+            }
+        }
     }
 
     private func saveSpeechSession() {
@@ -124,6 +174,31 @@ struct RootView: View {
             fromByteCount: modelManager.manifest.assets.reduce(0) { $0 + $1.size },
             countStyle: .file
         )
+    }
+}
+
+private struct AudioExportProgressView: View {
+    @ObservedObject var audioExport: AudioExportController
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Exporting Audio")
+                .font(.headline)
+            if case .exporting(let progress, let message) = audioExport.state {
+                ProgressView(value: progress)
+                Text(message)
+                    .foregroundStyle(.secondary)
+            }
+            HStack {
+                Spacer()
+                Button("Cancel", role: .cancel) {
+                    audioExport.cancel()
+                }
+                .keyboardShortcut(.cancelAction)
+            }
+        }
+        .padding(24)
+        .frame(width: 380)
     }
 }
 

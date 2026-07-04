@@ -133,6 +133,50 @@ final class KokoroSpeechEngine: RollingSpeechEngine {
 
     func preload(text: String, voiceIdentifier: String?, rate: Float) {}
 
+    func renderForExport(
+        chunks: [String],
+        voiceIdentifier: String?,
+        rate: Float,
+        destination: URL,
+        progress: @escaping @MainActor (Int, Int) -> Void
+    ) async throws {
+        try await prepare()
+        guard let synthesizer, let voice = resolvedVoice(voiceIdentifier) else {
+            throw SpeechEngineError.voiceUnavailable
+        }
+        let sampleRate = Double(KokoroTTS.Constants.samplingRate)
+        guard let format = AVAudioFormat(
+            standardFormatWithSampleRate: sampleRate,
+            channels: 1
+        ) else { throw SpeechEngineError.audioBuffer }
+        let output = try AVAudioFile(forWriting: destination, settings: format.settings)
+
+        for (index, text) in chunks.enumerated() {
+            try Task.checkCancellation()
+            let samples = try await synthesizer.generate(
+                text: text,
+                voiceName: voice.id,
+                speed: Self.kokoroSpeed(from: rate)
+            )
+            try Task.checkCancellation()
+            guard
+                let buffer = AVAudioPCMBuffer(
+                    pcmFormat: format,
+                    frameCapacity: AVAudioFrameCount(samples.count)
+                ),
+                let channel = buffer.floatChannelData?[0]
+            else { throw SpeechEngineError.audioBuffer }
+            buffer.frameLength = buffer.frameCapacity
+            samples.withUnsafeBufferPointer { source in
+                if let address = source.baseAddress {
+                    channel.update(from: address, count: source.count)
+                }
+            }
+            try output.write(from: buffer)
+            progress(index + 1, chunks.count)
+        }
+    }
+
     func pause() {
         playerNode.pause()
     }
