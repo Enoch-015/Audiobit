@@ -33,6 +33,43 @@ import ZIPFoundation
     #expect(sections[0].pageIndex == 2)
 }
 
+@Test func pdfLayoutJoinsWrappedLinesAndPreservesVisualGaps() {
+    let lines = [
+        PDFDocumentExtractor.TextLine(
+            text: "A paragraph wraps naturally onto",
+            bounds: CGRect(x: 20, y: 700, width: 240, height: 12)
+        ),
+        PDFDocumentExtractor.TextLine(
+            text: "the next line in the PDF.",
+            bounds: CGRect(x: 20, y: 686, width: 210, height: 12)
+        ),
+        PDFDocumentExtractor.TextLine(
+            text: "A new paragraph starts after whitespace.",
+            bounds: CGRect(x: 20, y: 650, width: 280, height: 12)
+        )
+    ]
+
+    #expect(
+        PDFDocumentExtractor.text(from: lines)
+            == "A paragraph wraps naturally onto the next line in the PDF.\n\nA new paragraph starts after whitespace."
+    )
+}
+
+@Test func pdfLayoutJoinsHyphenatedWrappedWords() {
+    let lines = [
+        PDFDocumentExtractor.TextLine(
+            text: "program-",
+            bounds: CGRect(x: 20, y: 700, width: 80, height: 12)
+        ),
+        PDFDocumentExtractor.TextLine(
+            text: "ming languages",
+            bounds: CGRect(x: 20, y: 686, width: 120, height: 12)
+        )
+    ]
+
+    #expect(PDFDocumentExtractor.text(from: lines) == "program-ming languages")
+}
+
 @Test func sentenceAwareChunking() {
     let chunks = SpeechChunker.chunks(
         from: "First sentence. Second sentence is here. Third sentence.",

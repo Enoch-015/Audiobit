@@ -14,6 +14,11 @@ protocol DocumentExtractor: Sendable {
 }
 
 struct PDFDocumentExtractor: DocumentExtractor {
+    struct TextLine: Sendable {
+        var text: String
+        var bounds: CGRect
+    }
+
     func canHandle(_ url: URL) -> Bool {
         SupportedTypes.type(for: url)?.conforms(to: .pdf) == true
     }
@@ -35,7 +40,7 @@ struct PDFDocumentExtractor: DocumentExtractor {
                     "Reading page \(index + 1) of \(count)…"
                 )
                 guard let page = pdf.page(at: index) else { continue }
-                var text = TextUtilities.clean(page.string ?? "")
+                var text = Self.layoutAwareText(from: page)
 
                 if text.count < 24 {
                     await progress(
@@ -73,6 +78,72 @@ struct PDFDocumentExtractor: DocumentExtractor {
                 pageIndex: pageIndex
             )
         ]
+    }
+
+    private static func layoutAwareText(from page: PDFPage) -> String {
+        let pageBounds = page.bounds(for: .mediaBox)
+        guard let selection = page.selection(for: pageBounds) else {
+            return TextUtilities.clean(page.string ?? "")
+        }
+
+        let lines = selection.selectionsByLine().compactMap { line -> TextLine? in
+            let text = TextUtilities.clean(line.string ?? "")
+            guard !text.isEmpty else { return nil }
+            return TextLine(text: text, bounds: line.bounds(for: page))
+        }
+
+        guard !lines.isEmpty else {
+            return TextUtilities.clean(page.string ?? "")
+        }
+        return text(from: lines)
+    }
+
+    static func text(from lines: [TextLine]) -> String {
+        guard let first = lines.first else { return "" }
+
+        let typicalHeight = median(
+            lines.map(\.bounds.height).filter { $0 > 0 }
+        )
+        var result = first.text
+
+        for (previous, current) in zip(lines, lines.dropFirst()) {
+            let centerDistance = abs(previous.bounds.midY - current.bounds.midY)
+            let edgeGap = max(
+                0,
+                centerDistance - ((previous.bounds.height + current.bounds.height) / 2)
+            )
+            let sameVisualLine = centerDistance < max(previous.bounds.height, current.bounds.height) * 0.45
+            let changedColumn = sameVisualLine
+                || abs(current.bounds.minX - previous.bounds.minX) > max(previous.bounds.width, current.bounds.width) * 0.9
+            let paragraphGap = edgeGap > max(typicalHeight * 0.55, 3)
+
+            if paragraphGap || changedColumn {
+                result += "\n\n"
+            } else {
+                result += joiner(after: previous.text, before: current.text)
+            }
+            result += current.text
+        }
+
+        return TextUtilities.clean(result)
+    }
+
+    private static func joiner(after previous: String, before current: String) -> String {
+        if previous.hasSuffix("-"),
+           current.first?.isLowercase == true {
+            return ""
+        }
+        return " "
+    }
+
+    private static func median(_ values: [CGFloat]) -> CGFloat {
+        guard !values.isEmpty else { return 12 }
+        let sorted = values.sorted()
+        let middle = sorted.count / 2
+        if sorted.count.isMultiple(of: 2) {
+            return (sorted[middle - 1] + sorted[middle]) / 2
+        }
+        return sorted[middle]
     }
 
     private static func recognize(page: PDFPage) throws -> String {
