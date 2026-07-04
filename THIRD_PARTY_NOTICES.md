@@ -18,6 +18,8 @@ components. Their licenses remain with their respective authors.
   https://github.com/mlalma/KokoroTestApp
 - **LAME MP3 encoder** — GNU Lesser General Public License 2.1
   https://lame.sourceforge.io/
+- **Sparkle 2** — MIT License
+  https://github.com/sparkle-project/Sparkle
 
 The application does not transmit document contents to these projects or to
 any external speech service.

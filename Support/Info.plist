@@ -20,6 +20,24 @@
     <string>1.0</string>
     <key>CFBundleVersion</key>
     <string>1</string>
+    <key>SUFeedURL</key>
+    <string>https://github.com/Enoch-015/Audiobit/releases/download/latest-main/appcast.xml</string>
+    <key>SUPublicEDKey</key>
+    <string>gZ/Ep5WAyRIzdvT8m1qfGLwBH7ApCbcZ1FZS7l9etJk=</string>
+    <key>SURequireSignedFeed</key>
+    <true/>
+    <key>SUVerifyUpdateBeforeExtraction</key>
+    <true/>
+    <key>SUEnableAutomaticChecks</key>
+    <true/>
+    <key>SUScheduledCheckInterval</key>
+    <integer>86400</integer>
+    <key>SUAutomaticallyUpdate</key>
+    <false/>
+    <key>SUAllowsAutomaticUpdates</key>
+    <true/>
+    <key>SUEnableSystemProfiling</key>
+    <false/>
     <key>LSApplicationCategoryType</key>
     <string>public.app-category.productivity</string>
     <key>LSMinimumSystemVersion</key>

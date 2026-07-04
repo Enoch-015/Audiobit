@@ -55,11 +55,17 @@ let package = Package(
                 "KokoroSwift",
                 "ZIPFoundation",
                 .product(name: "LAME", package: "LAME-xcframework"),
+                "Sparkle",
                 .product(name: "MLX", package: "mlx-swift"),
                 .product(name: "MLXUtilsLibrary", package: "MLXUtilsLibrary")
             ],
             path: "Sources/DocumentReader",
             resources: [.process("Resources")]
+        ),
+        .binaryTarget(
+            name: "Sparkle",
+            url: "https://github.com/sparkle-project/Sparkle/releases/download/2.9.2/Sparkle-for-Swift-Package-Manager.zip",
+            checksum: "b83e37436774556ed055e0244b297ef2c790e0737393bf65bf495fcbba6eed65"
         ),
         .testTarget(
             name: "DocumentReaderTests",

@@ -1,0 +1,105 @@
+name: Publish Main Update
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: audibit-main-update
+  cancel-in-progress: true
+
+jobs:
+  test-build-and-publish:
+    runs-on: macos-15
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Require update signing key
+        env:
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+        run: |
+          if [ -z "$SPARKLE_ED_PRIVATE_KEY" ]; then
+            echo "::error::Add the exported Audibit Sparkle key as SPARKLE_ED_PRIVATE_KEY."
+            exit 1
+          fi
+
+      - name: Resolve dependencies
+        run: swift package resolve
+
+      - name: Run tests
+        run: swift test
+
+      - name: Prepare release metadata
+        run: |
+          echo "AUDIBIT_BUILD_NUMBER=$((100000 + GITHUB_RUN_NUMBER))" >> "$GITHUB_ENV"
+          echo "AUDIBIT_SHORT_VERSION=1.1.0" >> "$GITHUB_ENV"
+          echo "AUDIBIT_SOURCE_COMMIT=$GITHUB_SHA" >> "$GITHUB_ENV"
+
+      - name: Build production DMG
+        run: ./Scripts/build-dmg.sh
+
+      - name: Verify package metadata
+        run: |
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' .build/app/Audibit.app/Contents/Info.plist)" = "$AUDIBIT_BUILD_NUMBER"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :AudibitSourceCommit' .build/app/Audibit.app/Contents/Info.plist)" = "${{ github.sha }}"
+          codesign --verify --deep --strict .build/app/Audibit.app
+          hdiutil verify dist/Audibit.dmg
+          (cd dist && shasum -a 256 -c Audibit.dmg.sha256)
+
+      - name: Generate signed Sparkle appcast
+        env:
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+        run: |
+          set -eu
+          UPDATE_DIR="$RUNNER_TEMP/audibit-update"
+          KEY_FILE="$RUNNER_TEMP/audibit-sparkle-key"
+          mkdir -p "$UPDATE_DIR"
+          trap 'rm -f "$KEY_FILE"' EXIT
+          printf '%s' "$SPARKLE_ED_PRIVATE_KEY" > "$KEY_FILE"
+          chmod 600 "$KEY_FILE"
+          cp dist/Audibit.dmg "$UPDATE_DIR/Audibit.dmg"
+          cp dist/Audibit.dmg.sha256 "$UPDATE_DIR/Audibit.dmg.sha256"
+          git log -1 --pretty='format:# Audibit 1.1.0 (%H)%n%n%s%n%n%b' > "$UPDATE_DIR/Audibit.md"
+          SPARKLE_ROOT=$(find .build/artifacts -path '*/Sparkle/bin/generate_appcast' -print -quit)
+          test -x "$SPARKLE_ROOT"
+          "$SPARKLE_ROOT" \
+            --ed-key-file "$KEY_FILE" \
+            --download-url-prefix "https://github.com/Enoch-015/Audiobit/releases/download/latest-main/" \
+            --embed-release-notes \
+            --maximum-versions 1 \
+            --maximum-deltas 0 \
+            -o "$UPDATE_DIR/appcast.xml" \
+            "$UPDATE_DIR"
+          test -s "$UPDATE_DIR/appcast.xml"
+          grep -q 'sparkle:edSignature' "$UPDATE_DIR/appcast.xml"
+
+      - name: Publish rolling main release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          UPDATE_DIR="$RUNNER_TEMP/audibit-update"
+          if ! gh release view latest-main >/dev/null 2>&1; then
+            gh release create latest-main \
+              --target "$GITHUB_SHA" \
+              --title "Audibit — Latest Main Build" \
+              --notes "Automatically published after a successful main-branch test and build."
+          fi
+          gh release upload latest-main \
+            "$UPDATE_DIR/Audibit.dmg" \
+            "$UPDATE_DIR/Audibit.dmg.sha256" \
+            "$UPDATE_DIR/Audibit.md" \
+            --clobber
+          gh release upload latest-main "$UPDATE_DIR/appcast.xml" --clobber
+          gh release edit latest-main \
+            --title "Audibit 1.1.0 ($AUDIBIT_BUILD_NUMBER)" \
+            --notes-file "$UPDATE_DIR/Audibit.md"

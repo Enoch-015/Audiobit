@@ -14,7 +14,7 @@ offline OCR, system speech, and optional on-device neural voices in a focused
 Mac interface. Documents remain on the computer, speech is generated locally,
 and complete readings can be exported as MP3 files.
 
-**[Download Audibit for macOS](dist/Audibit.dmg)**
+**[Download the latest Audibit for macOS](https://github.com/Enoch-015/Audiobit/releases/download/latest-main/Audibit.dmg)**
 
 Requires macOS 15 or newer on Apple Silicon.
 
@@ -101,6 +101,23 @@ blocks the first launch, Control-click Audibit, choose **Open**, then confirm
 **Open**. A public notarized release requires a Developer ID Application
 certificate and Apple notarization credentials.
 
+## Automatic updates
+
+Audibit 1.1 and later include Sparkle for secure in-app updates. The app checks
+after launch when a check is due, then no more than once every 24 hours. There
+is no custom polling loop. Use **Audibit → Check for Updates…** at any time, or
+change automatic checking and downloading in **Settings → Updates**.
+
+Updates are published only after a `main` branch build passes the full test,
+bundle, signature, and DMG verification pipeline. Sparkle verifies every update
+with Audibit’s embedded EdDSA public key before replacing the installed app.
+Document caches, playlists, reading sessions, exported audio, settings, and
+downloaded Kokoro assets remain outside the app bundle and survive updates.
+
+Versions older than 1.1 do not contain Sparkle and require one final manual DMG
+installation. After installing 1.1 or newer in Applications, subsequent
+updates can install and relaunch automatically.
+
 ## Use Audibit
 
 1. Open a supported document with the toolbar, drag it into the window, or use
@@ -169,6 +186,34 @@ dist/Audibit.dmg
 
 The release script verifies both the app signature and the completed disk
 image, then prints the SHA-256 checksum.
+
+### Configure update publishing
+
+The repository publishes a rolling `latest-main` GitHub Release from
+`.github/workflows/publish-main-update.yml`. Before enabling it:
+
+1. Keep the Sparkle private key backed up outside the repository. The local
+   bootstrap key is stored in the login Keychain under the `Audibit` account,
+   with a permission-restricted export at
+   `~/Documents/Audibit-Release-Keys/Audibit-Sparkle-private-key`.
+2. In the GitHub repository, open **Settings → Secrets and variables →
+   Actions**.
+3. Create a repository secret named `SPARKLE_ED_PRIVATE_KEY`.
+4. Paste the complete contents of the exported private-key file as the secret
+   value.
+5. Run the **Publish Main Update** workflow once from GitHub Actions (or push
+   the next change to `main`) to create the initial `latest-main` release and
+   appcast.
+
+The workflow fails before building or publishing if that secret is absent. It
+never prints the secret, writes it only to the runner’s temporary directory,
+and removes the temporary file after generating the signed appcast. Do not
+generate a replacement key after users have installed an updater-enabled
+build; preserve and restore the existing key instead.
+
+Each successful `main` workflow uses an increasing numeric bundle build,
+creates a signed DMG and appcast, and replaces the stable release assets only
+after validation succeeds. Failed or cancelled builds are never advertised.
 
 ## Tests
 

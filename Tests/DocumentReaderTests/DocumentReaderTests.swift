@@ -213,6 +213,32 @@ private final class ExportTestFileManager: FileManager, @unchecked Sendable {
     )
 }
 
+@Test func updateConfigurationMatchesProductionPlist() throws {
+    let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+    let plistURL = testsDirectory
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .appendingPathComponent("Support/Info.plist")
+    let data = try Data(contentsOf: plistURL)
+    let plist = try #require(
+        PropertyListSerialization.propertyList(from: data, format: nil)
+            as? [String: Any]
+    )
+
+    #expect(plist["SUFeedURL"] as? String == UpdateConfiguration.feedURL.absoluteString)
+    #expect(plist["SUPublicEDKey"] as? String == UpdateConfiguration.publicEDKey)
+    #expect(plist["SUEnableAutomaticChecks"] as? Bool == true)
+    #expect(plist["SURequireSignedFeed"] as? Bool == true)
+    #expect(plist["SUVerifyUpdateBeforeExtraction"] as? Bool == true)
+    #expect(plist["SUAutomaticallyUpdate"] as? Bool == false)
+    #expect(plist["SUAllowsAutomaticUpdates"] as? Bool == true)
+    #expect(plist["SUEnableSystemProfiling"] as? Bool == false)
+    #expect(
+        (plist["SUScheduledCheckInterval"] as? NSNumber)?.doubleValue
+            == UpdateConfiguration.checkInterval
+    )
+}
+
 private func waveFixture() -> Data {
     let sampleRate: UInt32 = 24_000
     let sampleCount = 4_800
