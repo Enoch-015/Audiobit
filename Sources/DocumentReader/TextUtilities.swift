@@ -12,14 +12,8 @@ enum TextUtilities {
 
     static func paragraphs(from text: String) -> [String] {
         clean(text)
-            .components(separatedBy: "\n\n")
-            .map { paragraph in
-                paragraph
-                    .components(separatedBy: .newlines)
-                    .map { $0.trimmingCharacters(in: .whitespaces) }
-                    .filter { !$0.isEmpty }
-                    .joined(separator: " ")
-            }
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
     }
 }
@@ -30,8 +24,8 @@ enum SpeechChunker {
         guard !cleaned.isEmpty else { return [] }
 
         var result: [String] = []
-        for paragraph in cleaned.components(separatedBy: "\n\n") {
-            let trimmed = paragraph.trimmingCharacters(in: .whitespacesAndNewlines)
+        for line in cleaned.components(separatedBy: .newlines) {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { continue }
             result.append(contentsOf: chunks(in: trimmed, maximumLength: maximumLength))
         }

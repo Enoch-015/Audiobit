@@ -17,11 +17,20 @@ import ZIPFoundation
     #expect(cleaned == "Hello world\n\nNext")
 }
 
-@Test func paragraphParsingMergesWrappedLines() {
+@Test func paragraphParsingPreservesExplicitLines() {
     let paragraphs = TextUtilities.paragraphs(from: "First line\nsecond line\n\nThird line")
-    #expect(paragraphs.count == 2)
-    #expect(paragraphs[0] == "First line second line")
-    #expect(paragraphs[1] == "Third line")
+    #expect(paragraphs == ["First line", "second line", "Third line"])
+}
+
+@Test func pdfSectionsPreserveExplicitLines() {
+    let sections = PDFDocumentExtractor.sections(
+        from: "Heading\nFirst paragraph line\nSecond paragraph line",
+        pageIndex: 2
+    )
+    #expect(sections.count == 1)
+    #expect(sections[0].title == "Page 3")
+    #expect(sections[0].text == "Heading\nFirst paragraph line\nSecond paragraph line")
+    #expect(sections[0].pageIndex == 2)
 }
 
 @Test func sentenceAwareChunking() {
@@ -52,6 +61,14 @@ import ZIPFoundation
     #expect(chunks[1].hasPrefix("Second paragraph"))
 }
 
+@Test func singleNewlineCreatesSeparateSpeechChunks() {
+    let chunks = SpeechChunker.chunks(
+        from: "First entered line\nSecond entered line",
+        maximumLength: 200
+    )
+    #expect(chunks == ["First entered line", "Second entered line"])
+}
+
 @Test func oversizedSentenceStaysIntact() {
     let text = Array(repeating: "lengthy", count: 40).joined(separator: " ") + "."
     let chunks = SpeechChunker.chunks(from: text, maximumLength: 50)
@@ -75,9 +92,13 @@ import ZIPFoundation
     let sourceDirectory = tempDirectory.appendingPathComponent("source", isDirectory: true)
     let pptDirectory = sourceDirectory.appendingPathComponent("ppt", isDirectory: true)
     let relsDirectory = pptDirectory.appendingPathComponent("_rels", isDirectory: true)
+    let mediaDirectory = pptDirectory.appendingPathComponent("media", isDirectory: true)
     let slidesDirectory = pptDirectory.appendingPathComponent("slides", isDirectory: true)
+    let slideRelsDirectory = slidesDirectory.appendingPathComponent("_rels", isDirectory: true)
     try FileManager.default.createDirectory(at: relsDirectory, withIntermediateDirectories: true)
     try FileManager.default.createDirectory(at: slidesDirectory, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: mediaDirectory, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: slideRelsDirectory, withIntermediateDirectories: true)
 
     let presentationXML = """
     <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -125,6 +146,12 @@ import ZIPFoundation
         </p:cSld>
     </p:sld>
     """
+    let slide2RelsXML = """
+    <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+    <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+        <Relationship Id="rId9" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image1.png"/>
+    </Relationships>
+    """
     let slide3XML = """
     <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
     <p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
@@ -141,12 +168,16 @@ import ZIPFoundation
         </p:cSld>
     </p:sld>
     """
+    let pngBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO2tX0cAAAAASUVORK5CYII="
+    let pngData = Data(base64Encoded: pngBase64)!
 
     try presentationXML.data(using: .utf8)!.write(to: pptDirectory.appendingPathComponent("presentation.xml"))
     try relationshipsXML.data(using: .utf8)!.write(to: relsDirectory.appendingPathComponent("presentation.xml.rels"))
     try slide1XML.data(using: .utf8)!.write(to: slidesDirectory.appendingPathComponent("slide1.xml"))
     try slide2XML.data(using: .utf8)!.write(to: slidesDirectory.appendingPathComponent("slide2.xml"))
+    try slide2RelsXML.data(using: .utf8)!.write(to: slideRelsDirectory.appendingPathComponent("slide2.xml.rels"))
     try slide3XML.data(using: .utf8)!.write(to: slidesDirectory.appendingPathComponent("slide3.xml"))
+    try pngData.write(to: mediaDirectory.appendingPathComponent("image1.png"))
 
     let pptxURL = tempDirectory.appendingPathComponent("deck.pptx")
     try FileManager.default.zipItem(at: sourceDirectory, to: pptxURL, shouldKeepParent: false)
@@ -159,8 +190,11 @@ import ZIPFoundation
     #expect(content.sections.count == 3)
     #expect(content.sections[0].text.contains("First slide text."))
     #expect(content.sections[1].text.contains("Image on this slide."))
+    #expect(content.sections[1].imageData != nil)
+    #expect(content.sections[1].displayText.isEmpty)
     #expect(content.sections[2].text.contains("Third slide wraps"))
     #expect(content.sections[2].text.contains("across lines."))
+    #expect(content.sections[2].text.contains("Third slide wraps\nacross lines."))
     #expect(!content.sections[2].text.contains("<a:"))
 }
 

@@ -5,13 +5,33 @@ struct ReadingSection: Identifiable, Codable, Hashable, Sendable {
     let id: UUID
     var title: String
     var text: String
+    var imageData: Data?
     var pageIndex: Int?
 
-    init(id: UUID = UUID(), title: String, text: String, pageIndex: Int? = nil) {
+    init(
+        id: UUID = UUID(),
+        title: String,
+        text: String,
+        imageData: Data? = nil,
+        pageIndex: Int? = nil
+    ) {
         self.id = id
         self.title = title
         self.text = text
+        self.imageData = imageData
         self.pageIndex = pageIndex
+    }
+
+    var displayText: String {
+        guard imageData != nil else { return text }
+        return text
+            .components(separatedBy: .newlines)
+            .filter {
+                $0.trimmingCharacters(in: .whitespacesAndNewlines)
+                    .localizedCaseInsensitiveCompare("Image on this slide.") != .orderedSame
+            }
+            .joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 

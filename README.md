@@ -29,6 +29,10 @@ The app requires macOS 15 or newer on Apple Silicon. It supports PDF (including
 OCR for scanned pages), TXT, Markdown, RTF, PNG, JPEG, TIFF, and HEIC.
 Documents and generated audio stay on the Mac.
 
+PDF and PowerPoint reading preserves explicit line breaks. Each PDF page and
+PowerPoint slide remains one navigation item, while text entered on a new line
+is displayed and spoken as a separate unit within that page or slide.
+
 Kokoro model weights are Apache-2.0 licensed. KokoroSwift, MLX Swift,
 MisakiSwift, and MLXUtilsLibrary retain their respective upstream licenses;
 see `THIRD_PARTY_NOTICES.md`.

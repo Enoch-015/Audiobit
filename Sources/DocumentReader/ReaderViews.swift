@@ -238,6 +238,10 @@ private struct DocumentSurface: View {
         content.typeIdentifier == UTType.pdf.identifier
     }
 
+    private var isPPTX: Bool {
+        content.typeIdentifier == (UTType(filenameExtension: "pptx")?.identifier ?? "org.openxmlformats.presentationml.presentation")
+    }
+
     var body: some View {
         if isPDF {
             HSplitView {
@@ -253,6 +257,24 @@ private struct DocumentSurface: View {
                     searchText: searchText
                 )
                 .frame(minWidth: 280, idealWidth: 360, maxWidth: 520)
+            }
+        } else if isPPTX {
+            if let section = content.sections[safe: selectedIndex],
+               section.imageData != nil,
+               section.displayText.isEmpty {
+                SlideImageView(section: section)
+            } else {
+                HSplitView {
+                    SlideImageView(section: content.sections[safe: selectedIndex])
+                        .frame(minWidth: 420)
+
+                    ReadingTextView(
+                        content: content,
+                        selectedIndex: selectedIndex,
+                        searchText: searchText
+                    )
+                    .frame(minWidth: 280, idealWidth: 360, maxWidth: 520)
+                }
             }
         } else {
             ReadingTextView(
@@ -279,10 +301,12 @@ private struct ReadingTextView: View {
                             Text(section.title)
                                 .font(.headline)
                                 .foregroundStyle(.secondary)
-                            Text(section.text)
-                                .font(.system(size: 16))
-                                .lineSpacing(5)
-                                .textSelection(.enabled)
+                            if !section.displayText.isEmpty {
+                                Text(section.displayText)
+                                    .font(.system(size: 16))
+                                    .lineSpacing(5)
+                                    .textSelection(.enabled)
+                            }
                         }
                         .padding(.horizontal, 28)
                         .padding(.vertical, 22)
@@ -316,8 +340,32 @@ private struct ReadingTextView: View {
 
     private func matchesSearch(_ section: ReadingSection) -> Bool {
         searchText.isEmpty ||
-            section.text.localizedCaseInsensitiveContains(searchText) ||
+            section.displayText.localizedCaseInsensitiveContains(searchText) ||
             section.title.localizedCaseInsensitiveContains(searchText)
+    }
+}
+
+private struct SlideImageView: View {
+    let section: ReadingSection?
+
+    var body: some View {
+        ZStack {
+            Color(nsColor: .textBackgroundColor)
+            if let section, let data = section.imageData, let image = NSImage(data: data) {
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .padding(24)
+            } else {
+                VStack(spacing: 12) {
+                    Image(systemName: "photo")
+                        .font(.system(size: 32, weight: .light))
+                        .foregroundStyle(.secondary)
+                    Text("No slide image available")
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
     }
 }
 

@@ -47,18 +47,7 @@ struct PDFDocumentExtractor: DocumentExtractor {
                 }
 
                 if !text.isEmpty {
-                    let paragraphs = TextUtilities.paragraphs(from: text)
-                    sections.append(contentsOf:
-                        paragraphs.enumerated().map { paragraphIndex, paragraph in
-                            ReadingSection(
-                                title: paragraphs.count == 1
-                                    ? "Page \(index + 1)"
-                                    : "Page \(index + 1) · \(paragraphIndex + 1)",
-                                text: paragraph,
-                                pageIndex: index
-                            )
-                        }
-                    )
+                    sections.append(contentsOf: Self.sections(from: text, pageIndex: index))
                 }
             }
 
@@ -72,6 +61,18 @@ struct PDFDocumentExtractor: DocumentExtractor {
                 usedOCR: usedOCR
             )
         }.value
+    }
+
+    static func sections(from text: String, pageIndex: Int) -> [ReadingSection] {
+        let cleaned = TextUtilities.clean(text)
+        guard !cleaned.isEmpty else { return [] }
+        return [
+            ReadingSection(
+                title: "Page \(pageIndex + 1)",
+                text: cleaned,
+                pageIndex: pageIndex
+            )
+        ]
     }
 
     private static func recognize(page: PDFPage) throws -> String {
@@ -117,6 +118,7 @@ struct PresentationDocumentExtractor: DocumentExtractor {
                     ReadingSection(
                         title: slide.title ?? "Slide \(index + 1)",
                         text: slide.text,
+                        imageData: slide.imageData,
                         pageIndex: index
                     )
                 },
@@ -129,6 +131,7 @@ struct PresentationDocumentExtractor: DocumentExtractor {
 private struct PPTXSlide {
     let title: String?
     let text: String
+    let imageData: Data?
 }
 
 private struct PPTXParser {
@@ -140,20 +143,21 @@ private struct PPTXParser {
             let slideURL = rootDirectory
                 .appendingPathComponent("ppt", isDirectory: true)
                 .appendingPathComponent(slidePath)
+            let relationships = try slideRelationships(for: slidePath)
             let xml = try String(contentsOf: slideURL, encoding: .utf8)
             let extractedText = slideText(from: xml)
-            let imageCount = imageCount(in: xml)
+            let imageData = extractImageData(from: relationships)
             let slideText: String
 
             if extractedText.isEmpty {
-                slideText = imageCount > 0 ? "Image on this slide." : "No readable text on this slide."
-            } else if imageCount > 0 {
+                slideText = imageData != nil ? "Image on this slide." : "No readable text on this slide."
+            } else if imageData != nil {
                 slideText = extractedText + "\n\nImage on this slide."
             } else {
                 slideText = extractedText
             }
 
-            return PPTXSlide(title: "Slide \(index + 1)", text: slideText)
+            return PPTXSlide(title: "Slide \(index + 1)", text: slideText, imageData: imageData)
         }
     }
 
@@ -184,18 +188,41 @@ private struct PPTXParser {
     }
 
     private func relationshipTargets(from xml: String) -> [String: String] {
-        let pattern = #"<Relationship\b[^>]*Id="([^"]+)"[^>]*Type="[^"]*/slide"[^>]*Target="([^"]+)"[^>]*/?>"#
+        let pattern = #"<Relationship\b[^>]*Id="([^"]+)"[^>]*Target="([^"]+)"[^>]*/?>"#
         return Dictionary(uniqueKeysWithValues: capturePairs(in: xml, pattern: pattern))
+    }
+
+    private func slideRelationships(for slidePath: String) throws -> [String: String] {
+        let slideRelationshipsURL = rootDirectory
+            .appendingPathComponent("ppt", isDirectory: true)
+            .appendingPathComponent("slides", isDirectory: true)
+            .appendingPathComponent("_rels", isDirectory: true)
+            .appendingPathComponent((slidePath as NSString).lastPathComponent + ".rels")
+        guard FileManager.default.fileExists(atPath: slideRelationshipsURL.path) else {
+            return [:]
+        }
+        let xml = try String(contentsOf: slideRelationshipsURL, encoding: .utf8)
+        return relationshipTargets(from: xml)
+    }
+
+    private func extractImageData(from relationships: [String: String]) -> Data? {
+        for target in relationships.values {
+            let lowercased = target.lowercased()
+            guard lowercased.hasSuffix(".png") || lowercased.hasSuffix(".jpg") || lowercased.hasSuffix(".jpeg") || lowercased.hasSuffix(".heic") || lowercased.hasSuffix(".tiff") || lowercased.hasSuffix(".gif") else {
+                continue
+            }
+
+            let imageURL = URL(fileURLWithPath: target, relativeTo: rootDirectory.appendingPathComponent("ppt/slides", isDirectory: true))
+                .standardizedFileURL
+            if let data = try? Data(contentsOf: imageURL), !data.isEmpty {
+                return data
+            }
+        }
+        return nil
     }
 
     private func slideText(from xml: String) -> String {
         SlideTextExtractor.extract(from: xml)
-    }
-
-    private func imageCount(in xml: String) -> Int {
-        guard let regex = try? NSRegularExpression(pattern: #"<a:blip\b"#, options: []) else { return 0 }
-        let range = NSRange(xml.startIndex..<xml.endIndex, in: xml)
-        return regex.numberOfMatches(in: xml, options: [], range: range)
     }
 
     private func slideNumber(in fileName: String) -> Int {
@@ -257,7 +284,7 @@ private final class SlideTextExtractor: NSObject, XMLParserDelegate {
             appendNewline()
         } else if elementName == "p" {
             if !result.isEmpty && !lastWasNewline {
-                result += " "
+                appendNewline()
             }
         }
     }

@@ -1,7 +1,7 @@
 import Foundation
 
 actor ContentCache {
-    private static let cacheVersion = 2
+    private static let cacheVersion = 3
     private static let versionKey = "contentCacheVersion"
     private let directory: URL
 
