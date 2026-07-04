@@ -36,40 +36,9 @@ final class DocumentController: ObservableObject {
 
     func open(_ url: URL) {
         loadTask?.cancel()
-        state = .loading
-        content = nil
-        progress = 0
-        progressMessage = "Opening \(url.lastPathComponent)…"
-
         loadTask = Task {
             do {
-                guard SupportedTypes.isSupported(url),
-                      let extractor = extractors.first(where: { $0.canHandle(url) })
-                else { throw ReaderError.unsupported }
-
-                let loaded: DocumentContent
-                if let cached = await cache.load(for: url) {
-                    loaded = cached
-                    progress = 1
-                    progressMessage = "Ready"
-                } else {
-                    loaded = try await extractor.extract(from: url) { [weak self] fraction, message in
-                        await MainActor.run {
-                            self?.progress = fraction
-                            self?.progressMessage = message
-                        }
-                    }
-                    await cache.save(loaded, for: url)
-                }
-
-                try Task.checkCancellation()
-                content = loaded
-                selectedSectionIndex = min(
-                    ReaderPersistence.shared.session(for: url).sectionIndex,
-                    max(0, loaded.sections.count - 1)
-                )
-                addRecent(url)
-                state = .ready
+                _ = try await loadAndPresent(url, sectionIndex: nil)
             } catch is CancellationError {
                 if content == nil { state = .empty }
             } catch {
@@ -77,6 +46,21 @@ final class DocumentController: ObservableObject {
                     (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
                 )
             }
+        }
+    }
+
+    func openForPlaylist(_ url: URL) async throws -> DocumentContent {
+        loadTask?.cancel()
+        loadTask = nil
+        do {
+            return try await loadAndPresent(url, sectionIndex: 0)
+        } catch {
+            if !(error is CancellationError) {
+                state = .failed(
+                    (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                )
+            }
+            throw error
         }
     }
 
@@ -123,6 +107,46 @@ final class DocumentController: ObservableObject {
         recentDocuments.insert(RecentDocument(url: url, lastOpened: Date()), at: 0)
         recentDocuments = Array(recentDocuments.prefix(12))
         ReaderPersistence.shared.saveRecents(recentDocuments)
+    }
+
+    private func loadAndPresent(
+        _ url: URL,
+        sectionIndex: Int?
+    ) async throws -> DocumentContent {
+        state = .loading
+        content = nil
+        progress = 0
+        progressMessage = "Opening \(url.lastPathComponent)…"
+
+        guard SupportedTypes.isSupported(url),
+              FileManager.default.fileExists(atPath: url.path),
+              let extractor = extractors.first(where: { $0.canHandle(url) })
+        else { throw ReaderError.unsupported }
+
+        let loaded: DocumentContent
+        if let cached = await cache.load(for: url) {
+            loaded = cached
+            progress = 1
+            progressMessage = "Ready"
+        } else {
+            loaded = try await extractor.extract(from: url) { [weak self] fraction, message in
+                await MainActor.run {
+                    self?.progress = fraction
+                    self?.progressMessage = message
+                }
+            }
+            await cache.save(loaded, for: url)
+        }
+
+        try Task.checkCancellation()
+        content = loaded
+        selectedSectionIndex = min(
+            sectionIndex ?? ReaderPersistence.shared.session(for: url).sectionIndex,
+            max(0, loaded.sections.count - 1)
+        )
+        addRecent(url)
+        state = .ready
+        return loaded
     }
 
     private func persistSession() {

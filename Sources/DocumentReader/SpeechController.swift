@@ -19,6 +19,7 @@ final class SpeechController: ObservableObject {
     }
     @Published private(set) var engineKind: SpeechEngineKind = .apple
     @Published var fallbackMessage: String?
+    var documentFinishedHandler: (@MainActor () -> Void)?
 
     private let modelManager: KokoroModelManager
     private let appleEngine: AppleSpeechEngine
@@ -42,7 +43,12 @@ final class SpeechController: ObservableObject {
         voices = apple.voices
     }
 
-    func load(_ content: DocumentContent, sectionIndex: Int, session: ReadingSession) {
+    func load(
+        _ content: DocumentContent,
+        sectionIndex: Int,
+        session: ReadingSession,
+        autoplay: Bool = false
+    ) {
         stop()
         self.content = content
         rate = session.speechRate
@@ -51,7 +57,11 @@ final class SpeechController: ObservableObject {
         switchEngine(
             to: session.speechEngine,
             preferredVoice: session.voiceIdentifier
-        )
+        ) { [weak self] in
+            if autoplay {
+                self?.speakCurrent()
+            }
+        }
     }
 
     func switchEngine(
@@ -258,6 +268,7 @@ final class SpeechController: ObservableObject {
             rollingPlaybackActive = false
             isSpeaking = false
             isPaused = false
+            documentFinishedHandler?()
             return
         }
         guard !manualStop else {
@@ -270,6 +281,7 @@ final class SpeechController: ObservableObject {
         } else {
             isSpeaking = false
             isPaused = false
+            documentFinishedHandler?()
         }
     }
 

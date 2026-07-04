@@ -5,25 +5,39 @@ import UniformTypeIdentifiers
 struct RootView: View {
     @StateObject private var documents = DocumentController()
     @StateObject private var audioExport = AudioExportController()
+    @StateObject private var playlists = PlaylistController()
     @ObservedObject var speech: SpeechController
     @ObservedObject private var modelManager = KokoroModelManager.shared
     @State private var showImporter = false
     @State private var searchText = ""
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var activateKokoroAfterInstall = false
+    @State private var selectedPlaylistID: UUID?
 
     var body: some View {
+        alertLayer
+    }
+
+    private var baseLayer: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
-            SidebarView(documents: documents, speech: speech)
+            SidebarView(
+                documents: documents,
+                speech: speech,
+                playlists: playlists,
+                selectedPlaylistID: $selectedPlaylistID
+            )
                 .navigationSplitViewColumnWidth(min: 190, ideal: 230, max: 300)
         } detail: {
             DetailView(
                 documents: documents,
                 speech: speech,
+                playlists: playlists,
+                selectedPlaylistID: $selectedPlaylistID,
                 searchText: searchText,
                 openAction: { showImporter = true },
                 backAction: {
                     speech.stop()
+                    playlists.stopPlayback(clearActivePlaylist: true)
                     documents.resetToStart()
                 }
             )
@@ -67,18 +81,50 @@ struct RootView: View {
                 .help("Speech settings")
             }
         }
+        .overlay(alignment: .top) {
+            if let message = playlists.skippedMessage {
+                HStack(spacing: 10) {
+                    Image(systemName: "exclamationmark.triangle")
+                    Text(message)
+                        .lineLimit(2)
+                    Button {
+                        playlists.skippedMessage = nil
+                    } label: {
+                        Image(systemName: "xmark")
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Dismiss playlist notice")
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(.separator, lineWidth: 1)
+                }
+                .padding(.top, 8)
+                .shadow(radius: 4, y: 2)
+            }
+        }
+    }
+
+    private var eventLayer: some View {
+        baseLayer
         .fileImporter(
             isPresented: $showImporter,
             allowedContentTypes: SupportedTypes.all + [.data],
             allowsMultipleSelection: false
         ) { result in
             if case let .success(urls) = result, let url = urls.first {
-                documents.open(url)
+                openManually(url)
             }
         }
-        .onOpenURL { documents.open($0) }
+        .onOpenURL { openManually($0) }
+        .onAppear {
+            playlists.configure(documents: documents, speech: speech)
+        }
         .onChange(of: documents.content) { _, content in
-            guard let content else { return }
+            guard let content, !playlists.isPlaying else { return }
             let session = ReaderPersistence.shared.session(for: content.sourceURL)
             speech.load(content, sectionIndex: documents.selectedSectionIndex, session: session)
         }
@@ -95,9 +141,13 @@ struct RootView: View {
         }
         .dropDestination(for: URL.self) { urls, _ in
             guard let url = urls.first else { return false }
-            documents.open(url)
+            openManually(url)
             return true
         }
+    }
+
+    private var alertLayer: some View {
+        eventLayer
         .alert(
             "Speech Playback",
             isPresented: Binding(
@@ -159,6 +209,12 @@ struct RootView: View {
         }
     }
 
+    private func openManually(_ url: URL) {
+        playlists.stopPlayback(clearActivePlaylist: false)
+        selectedPlaylistID = nil
+        documents.open(url)
+    }
+
     private func saveSpeechSession() {
         guard let url = documents.content?.sourceURL else { return }
         var session = ReaderPersistence.shared.session(for: url)
@@ -205,6 +261,8 @@ private struct AudioExportProgressView: View {
 private struct SidebarView: View {
     @ObservedObject var documents: DocumentController
     @ObservedObject var speech: SpeechController
+    @ObservedObject var playlists: PlaylistController
+    @Binding var selectedPlaylistID: UUID?
 
     var body: some View {
         List(selection: Binding(
@@ -214,6 +272,63 @@ private struct SidebarView: View {
                 speech.moveToSection(value)
             }
         )) {
+            Section {
+                ForEach(playlists.playlists) { playlist in
+                    Button {
+                        selectedPlaylistID = playlist.id
+                    } label: {
+                        HStack {
+                            Label(playlist.name, systemImage: "text.badge.plus")
+                                .lineLimit(1)
+                            Spacer()
+                            Text("\(playlist.items.count)")
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .listRowBackground(
+                        selectedPlaylistID == playlist.id
+                            ? Color.accentColor.opacity(0.12)
+                            : Color.clear
+                    )
+                    .contextMenu {
+                        Button("Play") {
+                            selectedPlaylistID = nil
+                            playlists.play(playlistID: playlist.id)
+                        }
+                        Button("Delete", role: .destructive) {
+                            playlists.deletePlaylist(playlist.id)
+                            if selectedPlaylistID == playlist.id {
+                                selectedPlaylistID = nil
+                            }
+                        }
+                    }
+                }
+            } header: {
+                HStack {
+                    Text("Playlists")
+                        .font(.headline)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(.primary)
+                    Spacer()
+                    Button {
+                        selectedPlaylistID = playlists.createPlaylist()
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(Color.accentColor)
+                            .frame(width: 26, height: 26)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Create playlist")
+                    .accessibilityLabel("Create playlist")
+                }
+                .padding(.trailing, 8)
+                .padding(.vertical, 3)
+            }
+
             if let content = documents.content {
                 Section("Contents") {
                     ForEach(Array(content.sections.enumerated()), id: \.element.id) { index, section in
@@ -227,6 +342,8 @@ private struct SidebarView: View {
                 Section("Recent") {
                     ForEach(documents.recentDocuments) { recent in
                         Button {
+                            playlists.stopPlayback(clearActivePlaylist: false)
+                            selectedPlaylistID = nil
                             documents.open(recent.url)
                         } label: {
                             Label(recent.url.lastPathComponent, systemImage: "doc")
@@ -254,6 +371,8 @@ private struct SidebarView: View {
 private struct DetailView: View {
     @ObservedObject var documents: DocumentController
     @ObservedObject var speech: SpeechController
+    @ObservedObject var playlists: PlaylistController
+    @Binding var selectedPlaylistID: UUID?
     let searchText: String
     let openAction: () -> Void
     let backAction: () -> Void
@@ -261,7 +380,23 @@ private struct DetailView: View {
     var body: some View {
         VStack(spacing: 0) {
             Group {
-                switch documents.state {
+                if let playlistID = selectedPlaylistID,
+                   let playlist = playlists.playlists.first(where: { $0.id == playlistID }) {
+                    PlaylistEditorView(
+                        playlist: playlist,
+                        currentDocumentURL: documents.content?.sourceURL,
+                        playlists: playlists,
+                        playPlaylist: {
+                            selectedPlaylistID = nil
+                            playlists.play(playlistID: playlist.id)
+                        },
+                        playItem: { index in
+                            selectedPlaylistID = nil
+                            playlists.play(playlistID: playlist.id, itemIndex: index)
+                        }
+                    )
+                } else {
+                    switch documents.state {
                 case .empty:
                     EmptyReaderView(openAction: openAction)
                 case .loading:
@@ -281,13 +416,15 @@ private struct DetailView: View {
                         )
                     }
                 }
+                }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            if let content = documents.content {
+            if let content = documents.content, selectedPlaylistID == nil {
                 Divider()
                 PlaybackBar(
                     speech: speech,
+                    playlists: playlists,
                     content: content,
                     sectionCount: content.sections.count,
                     selectedIndex: Binding(
@@ -300,6 +437,135 @@ private struct DetailView: View {
                     backAction: backAction
                 )
             }
+        }
+    }
+}
+
+private struct PlaylistEditorView: View {
+    let playlist: DocumentPlaylist
+    let currentDocumentURL: URL?
+    @ObservedObject var playlists: PlaylistController
+    let playPlaylist: () -> Void
+    let playItem: (Int) -> Void
+    @State private var name = ""
+    @State private var showImporter = false
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                TextField("Playlist name", text: $name)
+                    .font(.title2.weight(.semibold))
+                    .textFieldStyle(.plain)
+                    .onSubmit {
+                        playlists.renamePlaylist(playlist.id, to: name)
+                    }
+                    .accessibilityLabel("Playlist name")
+
+                Button {
+                    showImporter = true
+                } label: {
+                    Label("Add Documents", systemImage: "plus")
+                }
+
+                Button {
+                    if let currentDocumentURL {
+                        _ = playlists.addDocuments([currentDocumentURL], to: playlist.id)
+                    }
+                } label: {
+                    Label("Add Current", systemImage: "doc.badge.plus")
+                }
+                .disabled(currentDocumentURL == nil)
+                .help("Add the open document to this playlist")
+
+                Button {
+                    playPlaylist()
+                } label: {
+                    Label("Play", systemImage: "play.fill")
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(playlist.items.isEmpty)
+            }
+            .padding(20)
+
+            Divider()
+
+            if playlist.items.isEmpty {
+                ContentUnavailableView {
+                    Label("Empty Playlist", systemImage: "text.badge.plus")
+                } description: {
+                    Text("Add documents, or drop supported files here.")
+                } actions: {
+                    Button("Add Documents…") { showImporter = true }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                List {
+                    ForEach(Array(playlist.items.enumerated()), id: \.element.id) { index, item in
+                        HStack(spacing: 12) {
+                            Image(systemName: "line.3.horizontal")
+                                .foregroundStyle(.tertiary)
+                                .accessibilityHidden(true)
+                            Image(systemName: "doc.text")
+                                .foregroundStyle(.secondary)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(item.displayName)
+                                    .lineLimit(1)
+                                Text(item.fileURL.path)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                            Spacer()
+                            Button {
+                                playItem(index)
+                            } label: {
+                                Image(systemName: "play.fill")
+                            }
+                            .buttonStyle(.borderless)
+                            .help("Play this document")
+                            .accessibilityLabel("Play \(item.displayName)")
+                        }
+                        .contentShape(Rectangle())
+                        .onTapGesture(count: 2) { playItem(index) }
+                        .contextMenu {
+                            Button("Play") { playItem(index) }
+                            Button("Remove", role: .destructive) {
+                                playlists.removeItems(
+                                    in: playlist.id,
+                                    at: IndexSet(integer: index)
+                                )
+                            }
+                        }
+                    }
+                    .onMove { offsets, destination in
+                        playlists.moveItems(
+                            in: playlist.id,
+                            from: offsets,
+                            to: destination
+                        )
+                    }
+                    .onDelete { offsets in
+                        playlists.removeItems(in: playlist.id, at: offsets)
+                    }
+                }
+            }
+        }
+        .onAppear { name = playlist.name }
+        .onChange(of: playlist.name) { _, newName in name = newName }
+        .onDisappear {
+            playlists.renamePlaylist(playlist.id, to: name)
+        }
+        .fileImporter(
+            isPresented: $showImporter,
+            allowedContentTypes: SupportedTypes.all + [.data],
+            allowsMultipleSelection: true
+        ) { result in
+            if case .success(let urls) = result {
+                _ = playlists.addDocuments(urls, to: playlist.id)
+            }
+        }
+        .dropDestination(for: URL.self) { urls, _ in
+            playlists.addDocuments(urls, to: playlist.id) > 0
         }
     }
 }
@@ -446,6 +712,7 @@ private struct SlideImageView: View {
 
 private struct PlaybackBar: View {
     @ObservedObject var speech: SpeechController
+    @ObservedObject var playlists: PlaylistController
     @ObservedObject private var modelManager = KokoroModelManager.shared
     let content: DocumentContent
     let sectionCount: Int
@@ -458,6 +725,59 @@ private struct PlaybackBar: View {
                 Label("Back", systemImage: "chevron.left")
             }
             .help("Return to the start page and reupload a document")
+
+            if playlists.isPlaying, let playlist = playlists.activePlaylist {
+                Divider().frame(height: 20)
+
+                Button(action: playlists.playPreviousDocument) {
+                    Image(systemName: "backward.end")
+                }
+                .disabled(playlists.playbackState.currentItemIndex == 0)
+                .help("Previous playlist document")
+
+                Menu {
+                    ForEach(Array(playlist.items.enumerated()), id: \.element.id) { index, item in
+                        Button {
+                            playlists.playItem(at: index)
+                        } label: {
+                            if index == playlists.playbackState.currentItemIndex {
+                                Label(item.displayName, systemImage: "speaker.wave.2.fill")
+                            } else {
+                                Text(item.displayName)
+                            }
+                        }
+                    }
+                } label: {
+                    Label(
+                        "\(playlists.playbackState.currentItemIndex + 1) of \(playlist.items.count)",
+                        systemImage: "text.line.first.and.arrowtriangle.forward"
+                    )
+                }
+                .menuStyle(.borderlessButton)
+                .help("Up Next")
+
+                Button(action: playlists.playNextDocument) {
+                    Image(systemName: "forward.end")
+                }
+                .disabled(
+                    playlists.playbackState.currentItemIndex >= playlist.items.count - 1
+                        && playlists.playbackState.repeatMode != .playlist
+                )
+                .help("Next playlist document")
+
+                Button(action: playlists.cycleRepeatMode) {
+                    Image(systemName: playlists.playbackState.repeatMode.systemImage)
+                        .foregroundStyle(
+                            playlists.playbackState.repeatMode == .off
+                                ? Color.secondary
+                                : Color.accentColor
+                        )
+                }
+                .help(playlists.playbackState.repeatMode.label)
+                .accessibilityLabel(playlists.playbackState.repeatMode.label)
+
+                Divider().frame(height: 20)
+            }
 
             Button(action: speech.previousSection) {
                 Image(systemName: "backward.end.fill")

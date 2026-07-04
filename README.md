@@ -37,6 +37,8 @@ Requires macOS 15 or newer on Apple Silicon.
 - Background MP3 export using the selected speech engine, voice, and speed.
 - Local session restoration, extraction caching, recent documents, search,
   drag and drop, and **Open With** support.
+- Persistent named playlists with drag reordering, automatic document
+  transitions, an Up Next menu, and document or playlist repeat modes.
 - Light mode, dark mode, keyboard navigation, VoiceOver labels, and native
   accessibility behavior.
 
@@ -108,6 +110,13 @@ certificate and Apple notarization credentials.
 4. Press Play. Audibit highlights and reveals the current reading section.
 5. Choose **Export Audio** in the toolbar to create an MP3 in the background.
 
+Create playlists with the **+** button beside Playlists in the sidebar. Add
+multiple documents, add the currently open document, or drop files into the
+playlist editor. Double-click an item to start there. During playback, the
+bottom bar provides previous/next-document controls, an Up Next menu, and
+repeat modes for the current document or complete playlist. Unavailable files
+are skipped and reported without interrupting the remaining queue.
+
 Kokoro can be installed or removed from **Settings → Speech**. If its assets
 are unavailable or synthesis fails, Audibit safely falls back to Mac Voices.
 
@@ -171,7 +180,8 @@ swift test
 
 The tests cover supported-type detection, PDF visual spacing, PowerPoint
 extraction, text chunking, session compatibility, Kokoro asset verification,
-unique export naming, and real MP3 encoding.
+playlist persistence and repeat navigation, unique export naming, and real MP3
+encoding.
 
 ## Architecture
 
@@ -190,6 +200,9 @@ Audibit uses small, explicit layers:
   model assets.
 - `AudioExportController` renders chunked speech in the background and encodes
   a bounded-memory MP3 through the bundled LAME framework.
+- `PlaylistController` persists named document queues and coordinates
+  extraction, document transitions, skipped items, and repeat behavior above
+  the speech engines.
 
 ## Local data
 

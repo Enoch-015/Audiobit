@@ -121,6 +121,98 @@ private final class ExportTestFileManager: FileManager, @unchecked Sendable {
     #expect(data.starts(with: [0xFF, 0xF3]) || data.starts(with: [0xFF, 0xFB]))
 }
 
+@Test func playlistLibraryRoundTrip() throws {
+    let playlistID = UUID()
+    let item = PlaylistItem(fileURL: URL(fileURLWithPath: "/tmp/notes.pdf"))
+    let library = PlaylistLibrary(
+        playlists: [
+            DocumentPlaylist(id: playlistID, name: "Study", items: [item])
+        ],
+        playback: PlaylistPlaybackState(
+            activePlaylistID: playlistID,
+            currentItemIndex: 0,
+            repeatMode: .playlist
+        )
+    )
+
+    let decoded = try JSONDecoder().decode(
+        PlaylistLibrary.self,
+        from: JSONEncoder().encode(library)
+    )
+
+    #expect(decoded == library)
+}
+
+@MainActor
+@Test func playlistControllerEditsAndRestoresLibrary() {
+    let suite = "DocumentReaderTests.Playlists.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suite)!
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let persistence = ReaderPersistence(defaults: defaults)
+    let controller = PlaylistController(persistence: persistence)
+    let playlistID = controller.createPlaylist(name: "Reading")
+    let first = URL(fileURLWithPath: "/tmp/first.pdf")
+    let second = URL(fileURLWithPath: "/tmp/second.pdf")
+
+    #expect(controller.addDocuments([first, second, first], to: playlistID) == 2)
+    #expect(controller.playlists[0].items.map(\.fileURL) == [first, second])
+
+    controller.moveItems(
+        in: playlistID,
+        from: IndexSet(integer: 1),
+        to: 0
+    )
+    controller.renamePlaylist(playlistID, to: "Course Notes")
+    #expect(controller.playlists[0].items.map(\.fileURL) == [second, first])
+    #expect(controller.playlists[0].name == "Course Notes")
+
+    let restored = PlaylistController(persistence: persistence)
+    #expect(restored.playlists == controller.playlists)
+
+    restored.removeItems(in: playlistID, at: IndexSet(integer: 0))
+    #expect(restored.playlists[0].items.map(\.fileURL) == [first])
+    restored.deletePlaylist(playlistID)
+    #expect(restored.playlists.isEmpty)
+}
+
+@Test func playlistRepeatNavigationModes() {
+    #expect(
+        PlaylistNavigator.destinationAfterCompletion(
+            currentIndex: 0,
+            itemCount: 3,
+            repeatMode: .off
+        ) == 1
+    )
+    #expect(
+        PlaylistNavigator.destinationAfterCompletion(
+            currentIndex: 2,
+            itemCount: 3,
+            repeatMode: .off
+        ) == nil
+    )
+    #expect(
+        PlaylistNavigator.destinationAfterCompletion(
+            currentIndex: 1,
+            itemCount: 3,
+            repeatMode: .document
+        ) == 1
+    )
+    #expect(
+        PlaylistNavigator.destinationAfterCompletion(
+            currentIndex: 2,
+            itemCount: 3,
+            repeatMode: .playlist
+        ) == 0
+    )
+    #expect(
+        PlaylistNavigator.destinationAfterCompletion(
+            currentIndex: 0,
+            itemCount: 1,
+            repeatMode: .playlist
+        ) == 0
+    )
+}
+
 private func waveFixture() -> Data {
     let sampleRate: UInt32 = 24_000
     let sampleCount = 4_800

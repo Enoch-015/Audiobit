@@ -62,7 +62,11 @@ actor ContentCache {
 @MainActor
 final class ReaderPersistence {
     static let shared = ReaderPersistence()
-    private let defaults = UserDefaults.standard
+    private let defaults: UserDefaults
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+    }
 
     func recentDocuments() -> [RecentDocument] {
         guard let data = defaults.data(forKey: "recentDocuments") else { return [] }
@@ -92,6 +96,21 @@ final class ReaderPersistence {
         var recents = recentDocuments()
         recents.removeAll { $0.url.standardizedFileURL == url.standardizedFileURL }
         saveRecents(recents)
+    }
+
+    func playlistLibrary() -> PlaylistLibrary {
+        guard let data = defaults.data(forKey: "playlistLibrary.v1"),
+              let library = try? JSONDecoder().decode(PlaylistLibrary.self, from: data),
+              library.version == PlaylistLibrary.currentVersion
+        else { return PlaylistLibrary() }
+        return library
+    }
+
+    func savePlaylistLibrary(_ library: PlaylistLibrary) {
+        defaults.set(
+            try? JSONEncoder().encode(library),
+            forKey: "playlistLibrary.v1"
+        )
     }
 
     private func sessionKey(_ url: URL) -> String {

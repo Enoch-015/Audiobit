@@ -53,6 +53,93 @@ struct RecentDocument: Identifiable, Codable, Hashable, Sendable {
     var lastOpened: Date
 }
 
+struct PlaylistItem: Identifiable, Codable, Hashable, Sendable {
+    let id: UUID
+    var fileURL: URL
+    var displayName: String
+
+    init(id: UUID = UUID(), fileURL: URL, displayName: String? = nil) {
+        self.id = id
+        self.fileURL = fileURL.standardizedFileURL
+        self.displayName = displayName ?? fileURL.deletingPathExtension().lastPathComponent
+    }
+}
+
+struct DocumentPlaylist: Identifiable, Codable, Hashable, Sendable {
+    let id: UUID
+    var name: String
+    var items: [PlaylistItem]
+    var createdAt: Date
+    var updatedAt: Date
+
+    init(
+        id: UUID = UUID(),
+        name: String,
+        items: [PlaylistItem] = [],
+        createdAt: Date = .now,
+        updatedAt: Date = .now
+    ) {
+        self.id = id
+        self.name = name
+        self.items = items
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+}
+
+enum RepeatMode: String, Codable, CaseIterable, Sendable {
+    case off
+    case document
+    case playlist
+
+    var next: RepeatMode {
+        switch self {
+        case .off: .document
+        case .document: .playlist
+        case .playlist: .off
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .off: "Repeat Off"
+        case .document: "Repeat Document"
+        case .playlist: "Repeat Playlist"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .off: "repeat"
+        case .document: "repeat.1"
+        case .playlist: "repeat"
+        }
+    }
+}
+
+struct PlaylistPlaybackState: Codable, Equatable, Sendable {
+    var activePlaylistID: UUID?
+    var currentItemIndex: Int
+    var repeatMode: RepeatMode
+
+    init(
+        activePlaylistID: UUID? = nil,
+        currentItemIndex: Int = 0,
+        repeatMode: RepeatMode = .off
+    ) {
+        self.activePlaylistID = activePlaylistID
+        self.currentItemIndex = currentItemIndex
+        self.repeatMode = repeatMode
+    }
+}
+
+struct PlaylistLibrary: Codable, Equatable, Sendable {
+    static let currentVersion = 1
+    var version: Int = currentVersion
+    var playlists: [DocumentPlaylist] = []
+    var playback = PlaylistPlaybackState()
+}
+
 struct ReadingSession: Codable, Sendable {
     var sectionIndex: Int = 0
     var speechRate: Float = 0.5

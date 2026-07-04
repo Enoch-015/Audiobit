@@ -27,6 +27,7 @@ hdiutil create \
 
 codesign --verify --deep --strict "$APP"
 hdiutil verify "$DMG"
-shasum -a 256 "$DMG"
+(cd "$DIST" && shasum -a 256 "Audibit.dmg" > "Audibit.dmg.sha256")
+cat "$DMG.sha256"
 
 echo "$DMG"
