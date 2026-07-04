@@ -13,6 +13,10 @@ let package = Package(
             exact: "0.30.2"
         ),
         .package(
+            url: "https://github.com/weichsel/ZIPFoundation.git",
+            exact: "0.9.20"
+        ),
+        .package(
             url: "https://github.com/mlalma/MLXUtilsLibrary.git",
             exact: "0.0.5"
         )
@@ -45,6 +49,7 @@ let package = Package(
             name: "DocumentReader",
             dependencies: [
                 "KokoroSwift",
+                "ZIPFoundation",
                 .product(name: "MLX", package: "mlx-swift"),
                 .product(name: "MLXUtilsLibrary", package: "MLXUtilsLibrary")
             ],
@@ -53,7 +58,7 @@ let package = Package(
         ),
         .testTarget(
             name: "DocumentReaderTests",
-            dependencies: ["DocumentReader"],
+            dependencies: ["DocumentReader", "ZIPFoundation"],
             path: "Tests/DocumentReaderTests"
         )
     ]

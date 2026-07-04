@@ -87,10 +87,16 @@ enum ReaderError: LocalizedError {
 }
 
 enum SupportedTypes {
-    static let all: [UTType] = [
-        .pdf, .plainText, .utf8PlainText, .rtf,
-        .png, .jpeg, .tiff, .heic
-    ]
+    static let all: [UTType] = {
+        var types: [UTType] = [
+            .pdf, .plainText, .utf8PlainText, .rtf,
+            .png, .jpeg, .tiff, .heic
+        ]
+        if let pptx = UTType(filenameExtension: "pptx") {
+            types.append(pptx)
+        }
+        return types
+    }()
 
     static func type(for url: URL) -> UTType? {
         UTType(filenameExtension: url.pathExtension)
@@ -99,6 +105,6 @@ enum SupportedTypes {
     static func isSupported(_ url: URL) -> Bool {
         guard let type = type(for: url) else { return false }
         return all.contains { type.conforms(to: $0) } ||
-            ["md", "markdown"].contains(url.pathExtension.lowercased())
+            ["md", "markdown", "pptx"].contains(url.pathExtension.lowercased())
     }
 }

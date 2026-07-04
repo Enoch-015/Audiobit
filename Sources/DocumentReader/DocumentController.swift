@@ -21,6 +21,7 @@ final class DocumentController: ObservableObject {
 
     private let extractors: [any DocumentExtractor] = [
         PDFDocumentExtractor(),
+        PresentationDocumentExtractor(),
         RichTextExtractor(),
         PlainTextExtractor(),
         ImageDocumentExtractor()
@@ -89,6 +90,31 @@ final class DocumentController: ObservableObject {
         loadTask?.cancel()
         state = .empty
         content = nil
+        selectedSectionIndex = 0
+    }
+
+    func removeDocumentFromCache(_ url: URL) async {
+        loadTask?.cancel()
+        await cache.removeAll(for: url)
+        ReaderPersistence.shared.removeSession(for: url)
+        ReaderPersistence.shared.removeRecentDocument(for: url)
+
+        if content?.sourceURL.standardizedFileURL == url.standardizedFileURL {
+            state = .empty
+            content = nil
+            selectedSectionIndex = 0
+        }
+
+        recentDocuments = ReaderPersistence.shared.recentDocuments()
+            .filter { FileManager.default.fileExists(atPath: $0.url.path) }
+    }
+
+    func resetToStart() {
+        loadTask?.cancel()
+        state = .empty
+        content = nil
+        progress = 0
+        progressMessage = ""
         selectedSectionIndex = 0
     }
 

@@ -7,10 +7,14 @@ final class SpeechController: ObservableObject {
     @Published private(set) var isPreparing = false
     @Published private(set) var currentSectionIndex = 0
     @Published private(set) var voices: [SpeechVoice] = []
-    @Published var rate: Float = 0.5
+    @Published var rate: Float = 0.5 {
+        didSet {
+            handleRateChange(from: oldValue)
+        }
+    }
     @Published var voiceIdentifier: String? {
         didSet {
-            handleVoiceSelectionChange(from: oldValue)
+            handleVoiceChange(from: oldValue)
         }
     }
     @Published private(set) var engineKind: SpeechEngineKind = .apple
@@ -270,11 +274,23 @@ final class SpeechController: ObservableObject {
         }
     }
 
-    private func handleVoiceSelectionChange(from previousValue: String?) {
-        guard previousValue != voiceIdentifier else { return }
-        guard isSpeaking, !isPaused, !isPreparing, !isPreviewing else { return }
+    private func handleRateChange(from previousValue: Float) {
+        guard previousValue != rate else { return }
+        guard shouldRestartPlayback else { return }
 
         stop()
         speakCurrent()
+    }
+
+    private func handleVoiceChange(from previousValue: String?) {
+        guard previousValue != voiceIdentifier else { return }
+        guard shouldRestartPlayback else { return }
+
+        stop()
+        speakCurrent()
+    }
+
+    private var shouldRestartPlayback: Bool {
+        isSpeaking && !isPaused && !isPreparing && !isPreviewing
     }
 }

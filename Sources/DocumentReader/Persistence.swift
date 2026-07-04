@@ -1,6 +1,8 @@
 import Foundation
 
 actor ContentCache {
+    private static let cacheVersion = 2
+    private static let versionKey = "contentCacheVersion"
     private let directory: URL
 
     init() {
@@ -9,6 +11,11 @@ actor ContentCache {
             in: .userDomainMask
         ).first!
         directory = base.appendingPathComponent("DocumentReader/Extracted", isDirectory: true)
+        let defaults = UserDefaults.standard
+        if defaults.integer(forKey: Self.versionKey) != Self.cacheVersion {
+            try? FileManager.default.removeItem(at: directory)
+            defaults.set(Self.cacheVersion, forKey: Self.versionKey)
+        }
     }
 
     func load(for url: URL) -> DocumentContent? {
@@ -27,8 +34,24 @@ actor ContentCache {
         try? data.write(to: cacheURL(for: url, modified: modified), options: .atomic)
     }
 
+    func removeAll(for url: URL) {
+        let standardized = url.standardizedFileURL
+        guard let files = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) else {
+            return
+        }
+
+        for file in files where file.pathExtension == "json" {
+            guard let data = try? Data(contentsOf: file),
+                  let content = try? JSONDecoder().decode(DocumentContent.self, from: data),
+                  content.sourceURL.standardizedFileURL == standardized else {
+                continue
+            }
+            try? FileManager.default.removeItem(at: file)
+        }
+    }
+
     private func cacheURL(for url: URL, modified: Date) -> URL {
-        let source = "\(url.standardizedFileURL.path)|\(modified.timeIntervalSince1970)"
+        let source = "\(Self.cacheVersion)|\(url.standardizedFileURL.path)|\(modified.timeIntervalSince1970)"
         let safe = Data(source.utf8).base64EncodedString()
             .replacingOccurrences(of: "/", with: "_")
             .replacingOccurrences(of: "+", with: "-")
@@ -59,6 +82,16 @@ final class ReaderPersistence {
 
     func save(_ session: ReadingSession, for url: URL) {
         defaults.set(try? JSONEncoder().encode(session), forKey: sessionKey(url))
+    }
+
+    func removeSession(for url: URL) {
+        defaults.removeObject(forKey: sessionKey(url))
+    }
+
+    func removeRecentDocument(for url: URL) {
+        var recents = recentDocuments()
+        recents.removeAll { $0.url.standardizedFileURL == url.standardizedFileURL }
+        saveRecents(recents)
     }
 
     private func sessionKey(_ url: URL) -> String {

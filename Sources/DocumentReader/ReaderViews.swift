@@ -20,7 +20,11 @@ struct RootView: View {
                 documents: documents,
                 speech: speech,
                 searchText: searchText,
-                openAction: { showImporter = true }
+                openAction: { showImporter = true },
+                backAction: {
+                    speech.stop()
+                    documents.resetToStart()
+                }
             )
         }
         .navigationTitle(documents.content?.title ?? "Audiobit")
@@ -155,6 +159,15 @@ private struct SidebarView: View {
                         }
                         .buttonStyle(.plain)
                         .help(recent.url.path)
+                        .contextMenu {
+                            Button(role: .destructive) {
+                                Task {
+                                    await documents.removeDocumentFromCache(recent.url)
+                                }
+                            } label: {
+                                Label("Remove from Cache", systemImage: "trash")
+                            }
+                        }
                     }
                 }
             }
@@ -168,6 +181,7 @@ private struct DetailView: View {
     @ObservedObject var speech: SpeechController
     let searchText: String
     let openAction: () -> Void
+    let backAction: () -> Void
 
     var body: some View {
         VStack(spacing: 0) {
@@ -199,6 +213,7 @@ private struct DetailView: View {
                 Divider()
                 PlaybackBar(
                     speech: speech,
+                    content: content,
                     sectionCount: content.sections.count,
                     selectedIndex: Binding(
                         get: { documents.selectedSectionIndex },
@@ -206,7 +221,8 @@ private struct DetailView: View {
                             documents.selectedSectionIndex = $0
                             speech.moveToSection($0)
                         }
-                    )
+                    ),
+                    backAction: backAction
                 )
             }
         }
@@ -308,11 +324,18 @@ private struct ReadingTextView: View {
 private struct PlaybackBar: View {
     @ObservedObject var speech: SpeechController
     @ObservedObject private var modelManager = KokoroModelManager.shared
+    let content: DocumentContent
     let sectionCount: Int
     @Binding var selectedIndex: Int
+    let backAction: () -> Void
 
     var body: some View {
         HStack(spacing: 14) {
+            Button(action: backAction) {
+                Label("Back", systemImage: "chevron.left")
+            }
+            .help("Return to the start page and reupload a document")
+
             Button(action: speech.previousSection) {
                 Image(systemName: "backward.end.fill")
             }
@@ -354,6 +377,13 @@ private struct PlaybackBar: View {
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
                 .frame(minWidth: 58)
+
+            Text(playbackLocationText)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .frame(minWidth: 160, alignment: .leading)
 
             Menu {
                 if modelManager.state != .ready {
@@ -417,6 +447,16 @@ private struct PlaybackBar: View {
             countStyle: .file
         )
     }
+
+    private var playbackLocationText: String {
+        guard content.sections.indices.contains(selectedIndex) else {
+            return "Playback location unavailable"
+        }
+
+        let section = content.sections[selectedIndex]
+        let pageText = section.pageIndex.map { "Page \($0 + 1)" } ?? section.title
+        return "Playing to \(pageText)"
+    }
 }
 
 private struct EmptyReaderView: View {
@@ -431,7 +471,7 @@ private struct EmptyReaderView: View {
                 .font(.title2)
             Text("Drop a PDF, text document, or image here.")
                 .foregroundStyle(.secondary)
-            Button("Choose File…", action: openAction)
+            Button("Reupload / Choose File…", action: openAction)
                 .buttonStyle(.borderedProminent)
         }
         .accessibilityElement(children: .combine)

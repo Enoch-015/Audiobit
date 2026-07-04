@@ -2,10 +2,12 @@ import Foundation
 import CryptoKit
 import Testing
 @testable import DocumentReader
+import ZIPFoundation
 
 @Test func supportedTypeDetection() {
     #expect(SupportedTypes.isSupported(URL(fileURLWithPath: "/tmp/report.pdf")))
     #expect(SupportedTypes.isSupported(URL(fileURLWithPath: "/tmp/notes.md")))
+    #expect(SupportedTypes.isSupported(URL(fileURLWithPath: "/tmp/deck.pptx")))
     #expect(SupportedTypes.isSupported(URL(fileURLWithPath: "/tmp/scan.heic")))
     #expect(!SupportedTypes.isSupported(URL(fileURLWithPath: "/tmp/archive.zip")))
 }
@@ -15,6 +17,13 @@ import Testing
     #expect(cleaned == "Hello world\n\nNext")
 }
 
+@Test func paragraphParsingMergesWrappedLines() {
+    let paragraphs = TextUtilities.paragraphs(from: "First line\nsecond line\n\nThird line")
+    #expect(paragraphs.count == 2)
+    #expect(paragraphs[0] == "First line second line")
+    #expect(paragraphs[1] == "Third line")
+}
+
 @Test func sentenceAwareChunking() {
     let chunks = SpeechChunker.chunks(
         from: "First sentence. Second sentence is here. Third sentence.",
@@ -22,6 +31,15 @@ import Testing
     )
     #expect(chunks.count >= 2)
     #expect(chunks.joined(separator: " ").contains("Third sentence."))
+}
+
+@Test func chunkingFallsBackForLongNoStopParagraph() {
+    let chunks = SpeechChunker.chunks(
+        from: "This paragraph has no full stop and should remain intact until the paragraph ends",
+        maximumLength: 20
+    )
+    #expect(chunks.count > 1)
+    #expect(chunks.allSatisfy { $0.count <= 20 })
 }
 
 @Test func paragraphBoundariesArePreserved() {
@@ -34,7 +52,7 @@ import Testing
     #expect(chunks[1].hasPrefix("Second paragraph"))
 }
 
-@Test func oversizedSentenceIsSplit() {
+@Test func oversizedSentenceStaysIntact() {
     let text = Array(repeating: "lengthy", count: 40).joined(separator: " ") + "."
     let chunks = SpeechChunker.chunks(from: text, maximumLength: 50)
     #expect(chunks.count > 1)
@@ -49,6 +67,101 @@ import Testing
     #expect(content.sections.count == 2)
     #expect(content.sections[0].text == "First paragraph.")
     #expect(content.sections[1].text == "Second paragraph.")
+}
+
+@MainActor
+@Test func pptxExtractorReadsSlidesAndImages() async throws {
+    let tempDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    let sourceDirectory = tempDirectory.appendingPathComponent("source", isDirectory: true)
+    let pptDirectory = sourceDirectory.appendingPathComponent("ppt", isDirectory: true)
+    let relsDirectory = pptDirectory.appendingPathComponent("_rels", isDirectory: true)
+    let slidesDirectory = pptDirectory.appendingPathComponent("slides", isDirectory: true)
+    try FileManager.default.createDirectory(at: relsDirectory, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: slidesDirectory, withIntermediateDirectories: true)
+
+    let presentationXML = """
+    <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+    <p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+        <p:sldIdLst>
+            <p:sldId id="256" r:id="rId1"/>
+            <p:sldId id="257" r:id="rId2"/>
+            <p:sldId id="258" r:id="rId3"/>
+        </p:sldIdLst>
+    </p:presentation>
+    """
+    let relationshipsXML = """
+    <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+    <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+        <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide1.xml"/>
+        <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide2.xml"/>
+        <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide3.xml"/>
+    </Relationships>
+    """
+    let slide1XML = """
+    <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+    <p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
+        <p:cSld>
+            <p:spTree>
+                <p:sp>
+                    <p:txBody>
+                        <a:p><a:r><a:t>First slide text.</a:t></a:r></a:p>
+                    </p:txBody>
+                </p:sp>
+            </p:spTree>
+        </p:cSld>
+    </p:sld>
+    """
+    let slide2XML = """
+    <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+    <p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+        <p:cSld>
+            <p:spTree>
+                <p:pic>
+                    <p:blipFill>
+                        <a:blip r:embed="rId9"/>
+                    </p:blipFill>
+                </p:pic>
+            </p:spTree>
+        </p:cSld>
+    </p:sld>
+    """
+    let slide3XML = """
+    <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+    <p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
+        <p:cSld>
+            <p:spTree>
+                <p:sp>
+                    <p:txBody>
+                        <a:p><a:r><a:t>Third slide wraps</a:t></a:r></a:p>
+                        <a:p><a:br/></a:p>
+                        <a:p><a:r><a:t>across lines.</a:t></a:r></a:p>
+                    </p:txBody>
+                </p:sp>
+            </p:spTree>
+        </p:cSld>
+    </p:sld>
+    """
+
+    try presentationXML.data(using: .utf8)!.write(to: pptDirectory.appendingPathComponent("presentation.xml"))
+    try relationshipsXML.data(using: .utf8)!.write(to: relsDirectory.appendingPathComponent("presentation.xml.rels"))
+    try slide1XML.data(using: .utf8)!.write(to: slidesDirectory.appendingPathComponent("slide1.xml"))
+    try slide2XML.data(using: .utf8)!.write(to: slidesDirectory.appendingPathComponent("slide2.xml"))
+    try slide3XML.data(using: .utf8)!.write(to: slidesDirectory.appendingPathComponent("slide3.xml"))
+
+    let pptxURL = tempDirectory.appendingPathComponent("deck.pptx")
+    try FileManager.default.zipItem(at: sourceDirectory, to: pptxURL, shouldKeepParent: false)
+    defer { try? FileManager.default.removeItem(at: tempDirectory) }
+
+    let extractor = PresentationDocumentExtractor()
+    #expect(extractor.canHandle(pptxURL))
+
+    let content = try await extractor.extract(from: pptxURL) { _, _ in }
+    #expect(content.sections.count == 3)
+    #expect(content.sections[0].text.contains("First slide text."))
+    #expect(content.sections[1].text.contains("Image on this slide."))
+    #expect(content.sections[2].text.contains("Third slide wraps"))
+    #expect(content.sections[2].text.contains("across lines."))
+    #expect(!content.sections[2].text.contains("<a:"))
 }
 
 @Test func readingSessionRoundTrip() throws {
