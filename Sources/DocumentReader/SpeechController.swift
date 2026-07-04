@@ -96,6 +96,10 @@ final class SpeechController: ObservableObject {
                         : nil
                 }
                 configure(requested)
+                // Autoplay must observe the engine as ready. Calling the
+                // completion while `isPreparing` is still true causes
+                // speakCurrent() to reject playlist and repeat transitions.
+                isPreparing = false
                 completion?()
             } catch is CancellationError {
             } catch {
