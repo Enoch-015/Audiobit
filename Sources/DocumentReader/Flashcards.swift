@@ -1,5 +1,18 @@
 import Foundation
 
+enum FlashcardNavigator {
+    static func destinationAfterAnswer(
+        currentIndex: Int,
+        cardCount: Int,
+        repeatDeck: Bool
+    ) -> Int? {
+        guard cardCount > 0 else { return nil }
+        let next = currentIndex + 1
+        if next < cardCount { return next }
+        return repeatDeck ? 0 : nil
+    }
+}
+
 enum FlashcardParserError: LocalizedError, Equatable {
     case unreadable
     case empty
@@ -134,6 +147,7 @@ final class FlashcardController: ObservableObject {
     @Published private(set) var playback = FlashcardPlaybackState()
     @Published private(set) var isPlaying = false
     @Published private(set) var isPaused = false
+    @Published private(set) var repeatDeck = false
     @Published var errorMessage: String?
 
     var deckFinishedHandler: (@MainActor () -> Void)?
@@ -142,6 +156,7 @@ final class FlashcardController: ObservableObject {
     private weak var speech: SpeechController?
     private var countdownTask: Task<Void, Never>?
     private var generation = UUID()
+    private var managedByPlaylist = false
 
     init(persistence: ReaderPersistence = .shared) {
         self.persistence = persistence
@@ -210,9 +225,17 @@ final class FlashcardController: ObservableObject {
         persist()
     }
 
-    func refreshAndPlay(deckID: UUID, cardIndex: Int = 0) throws {
+    func refreshAndPlay(
+        deckID: UUID,
+        cardIndex: Int = 0,
+        managedByPlaylist: Bool = false
+    ) throws {
         try refreshDeck(deckID)
-        play(deckID: deckID, cardIndex: cardIndex)
+        play(
+            deckID: deckID,
+            cardIndex: cardIndex,
+            managedByPlaylist: managedByPlaylist
+        )
     }
 
     func refreshDeck(_ deckID: UUID) throws {
@@ -230,14 +253,23 @@ final class FlashcardController: ObservableObject {
         persist()
     }
 
-    func play(deckID: UUID, cardIndex: Int = 0) {
+    func play(
+        deckID: UUID,
+        cardIndex: Int = 0,
+        managedByPlaylist: Bool = false
+    ) {
         stop(clearDeck: false)
         guard let deck = decks.first(where: { $0.id == deckID }), !deck.cards.isEmpty else { return }
         playback.deckID = deckID
         playback.currentCardIndex = min(max(cardIndex, 0), deck.cards.count - 1)
         isPlaying = true
         isPaused = false
+        self.managedByPlaylist = managedByPlaylist
         speakQuestion()
+    }
+
+    func toggleRepeatDeck() {
+        repeatDeck.toggle()
     }
 
     func selectDeck(_ id: UUID) {
@@ -280,6 +312,7 @@ final class FlashcardController: ObservableObject {
         speech?.stopSegment()
         isPlaying = false
         isPaused = false
+        managedByPlaylist = false
         playback.phase = .idle
         playback.remainingDelay = 0
         if clearDeck {
@@ -348,9 +381,13 @@ final class FlashcardController: ObservableObject {
         }) { [weak self] in
             guard let self, self.generation == token, self.isPlaying,
                   let deck = self.activeDeck else { return }
-            let next = self.playback.currentCardIndex + 1
-            if deck.cards.indices.contains(next) {
-                self.playback.currentCardIndex = next
+            let shouldRepeatHere = self.repeatDeck && !self.managedByPlaylist
+            if let destination = FlashcardNavigator.destinationAfterAnswer(
+                currentIndex: self.playback.currentCardIndex,
+                cardCount: deck.cards.count,
+                repeatDeck: shouldRepeatHere
+            ) {
+                self.playback.currentCardIndex = destination
                 self.speakQuestion()
             } else {
                 self.isPlaying = false

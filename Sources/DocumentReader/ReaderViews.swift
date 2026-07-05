@@ -64,14 +64,19 @@ struct RootView: View {
                 .keyboardShortcut("o")
                 .help("Open a document")
 
-                if documents.content != nil {
+                if activeFlashcardDeck == nil, documents.content != nil {
                     TextField("Search", text: $searchText)
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 190)
                         .accessibilityLabel("Search document")
 
+                }
+
+                if activeFlashcardDeck != nil || documents.content != nil {
                     Button {
-                        if let content = documents.content {
+                        if let deck = activeFlashcardDeck {
+                            audioExport.start(deck: deck, speech: speech)
+                        } else if let content = documents.content {
                             audioExport.start(content: content, speech: speech)
                         }
                     } label: {
@@ -83,7 +88,11 @@ struct RootView: View {
                         }
                     }
                     .disabled(audioExport.isExporting)
-                    .help("Export this document as an MP3")
+                    .help(
+                        activeFlashcardDeck == nil
+                            ? "Export this document as an MP3"
+                            : "Export this flashcard deck as an MP3"
+                    )
                 }
 
                 SettingsLink {
@@ -269,6 +278,16 @@ struct RootView: View {
             fromByteCount: modelManager.manifest.assets.reduce(0) { $0 + $1.size },
             countStyle: .file
         )
+    }
+
+    private var activeFlashcardDeck: FlashcardDeck? {
+        if let selectedFlashcardID {
+            return flashcards.decks.first { $0.id == selectedFlashcardID }
+        }
+        if playlists.isPlaying, playlists.currentItem?.kind == .flashcardDeck {
+            return flashcards.activeDeck
+        }
+        return nil
     }
 }
 
@@ -751,6 +770,14 @@ private struct FlashcardPlaybackBar: View {
                     Image(systemName: "forward.end")
                 }
                 .help("Next playlist item")
+                Divider().frame(height: 20)
+            } else {
+                Button(action: flashcards.toggleRepeatDeck) {
+                    Image(systemName: "repeat")
+                        .foregroundStyle(flashcards.repeatDeck ? Color.accentColor : .secondary)
+                }
+                .help(flashcards.repeatDeck ? "Repeat deck on" : "Repeat deck off")
+                .accessibilityLabel(flashcards.repeatDeck ? "Repeat deck on" : "Repeat deck off")
                 Divider().frame(height: 20)
             }
 

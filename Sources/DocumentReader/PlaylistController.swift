@@ -262,7 +262,10 @@ final class PlaylistController: ObservableObject {
                             $0.sourceURL.standardizedFileURL == item.fileURL.standardizedFileURL
                         }?.id ?? flashcards.importDeck(item.fileURL)
                         guard let deckID else { throw FlashcardParserError.unreadable }
-                        try flashcards.refreshAndPlay(deckID: deckID)
+                        try flashcards.refreshAndPlay(
+                            deckID: deckID,
+                            managedByPlaylist: true
+                        )
                     } else {
                         flashcards.stop()
                         let content = try await documents.openForPlaylist(item.fileURL)

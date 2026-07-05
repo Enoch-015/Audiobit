@@ -134,7 +134,7 @@ final class KokoroSpeechEngine: RollingSpeechEngine {
     func preload(text: String, voiceIdentifier: String?, rate: Float) {}
 
     func renderForExport(
-        chunks: [String],
+        items: [SpeechExportItem],
         voiceIdentifier: String?,
         rate: Float,
         destination: URL,
@@ -151,10 +151,10 @@ final class KokoroSpeechEngine: RollingSpeechEngine {
         ) else { throw SpeechEngineError.audioBuffer }
         let output = try AVAudioFile(forWriting: destination, settings: format.settings)
 
-        for (index, text) in chunks.enumerated() {
+        for (index, item) in items.enumerated() {
             try Task.checkCancellation()
             let samples = try await synthesizer.generate(
-                text: text,
+                text: item.text,
                 voiceName: voice.id,
                 speed: Self.kokoroSpeed(from: rate)
             )
@@ -173,7 +173,19 @@ final class KokoroSpeechEngine: RollingSpeechEngine {
                 }
             }
             try output.write(from: buffer)
-            progress(index + 1, chunks.count)
+            if item.trailingSilence > 0 {
+                let silenceFrames = AVAudioFrameCount(item.trailingSilence * sampleRate)
+                guard let silence = AVAudioPCMBuffer(
+                    pcmFormat: format,
+                    frameCapacity: silenceFrames
+                ) else { throw SpeechEngineError.audioBuffer }
+                silence.frameLength = silenceFrames
+                if let samples = silence.floatChannelData?[0] {
+                    samples.initialize(repeating: 0, count: Int(silenceFrames))
+                }
+                try output.write(from: silence)
+            }
+            progress(index + 1, items.count)
         }
     }
 

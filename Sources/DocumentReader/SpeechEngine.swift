@@ -24,6 +24,16 @@ struct SpeechQueueItem: Identifiable, Hashable, Sendable {
     let text: String
 }
 
+struct SpeechExportItem: Hashable, Sendable {
+    let text: String
+    let trailingSilence: TimeInterval
+
+    init(text: String, trailingSilence: TimeInterval = 0) {
+        self.text = text
+        self.trailingSilence = max(0, trailingSilence)
+    }
+}
+
 enum SpeechPlaybackEvent: Sendable {
     case started
     case chunkStarted(Int)

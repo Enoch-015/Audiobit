@@ -100,6 +100,47 @@ import Testing
     #expect(deck.answerDelay == 12)
     #expect(deck.cards.first?.question == "Updated?")
 }
+
+@Test func flashcardAudioExportIncludesConfiguredRecallPauses() {
+    let deck = FlashcardDeck(
+        sourceURL: URL(fileURLWithPath: "/tmp/cards.md"),
+        title: "Study",
+        cards: [
+            Flashcard(question: "Question one?", answer: "Answer one."),
+            Flashcard(question: "Question two?", answer: "Answer two.")
+        ],
+        answerDelay: 9
+    )
+    let items = AudioExportController.exportItems(for: deck)
+    #expect(items.map(\.text) == [
+        "Question one?", "Answer one.", "Question two?", "Answer two."
+    ])
+    #expect(items.map(\.trailingSilence) == [9, 0, 9, 0])
+}
+
+@Test func flashcardDeckRepeatLoopsFromLastCard() {
+    #expect(
+        FlashcardNavigator.destinationAfterAnswer(
+            currentIndex: 2,
+            cardCount: 3,
+            repeatDeck: true
+        ) == 0
+    )
+    #expect(
+        FlashcardNavigator.destinationAfterAnswer(
+            currentIndex: 2,
+            cardCount: 3,
+            repeatDeck: false
+        ) == nil
+    )
+    #expect(
+        FlashcardNavigator.destinationAfterAnswer(
+            currentIndex: 0,
+            cardCount: 3,
+            repeatDeck: false
+        ) == 1
+    )
+}
 import ZIPFoundation
 
 @Test func supportedTypeDetection() {

@@ -20,9 +20,35 @@ final class AudioExportController: ObservableObject {
     }
 
     func start(content: DocumentContent, speech: SpeechController) {
+        let items = content.sections
+            .flatMap { SpeechChunker.chunks(from: $0.text) }
+            .map { SpeechExportItem(text: $0) }
+        start(title: content.title, items: items, speech: speech)
+    }
+
+    func start(deck: FlashcardDeck, speech: SpeechController) {
+        start(title: deck.title, items: Self.exportItems(for: deck), speech: speech)
+    }
+
+    nonisolated static func exportItems(for deck: FlashcardDeck) -> [SpeechExportItem] {
+        deck.cards.flatMap { card in
+            [
+                SpeechExportItem(
+                    text: card.question,
+                    trailingSilence: TimeInterval(deck.answerDelay)
+                ),
+                SpeechExportItem(text: card.answer)
+            ]
+        }
+    }
+
+    private func start(
+        title: String,
+        items: [SpeechExportItem],
+        speech: SpeechController
+    ) {
         guard !isExporting else { return }
-        let chunks = content.sections.flatMap { SpeechChunker.chunks(from: $0.text) }
-        guard !chunks.isEmpty else {
+        guard !items.isEmpty else {
             state = .failed("This document has no text to export.")
             return
         }
@@ -31,13 +57,13 @@ final class AudioExportController: ObservableObject {
         exportTask = Task { [weak self, weak speech] in
             guard let self, let speech else { return }
             do {
-                let destination = try Self.destinationURL(for: content.title)
+                let destination = try Self.destinationURL(for: title)
                 let temporary = FileManager.default.temporaryDirectory
                     .appendingPathComponent("Audiobit-\(UUID().uuidString).caf")
                 defer { try? FileManager.default.removeItem(at: temporary) }
 
                 try await speech.renderForExport(
-                    chunks: chunks,
+                    items: items,
                     to: temporary
                 ) { [weak self] completed, total in
                     guard let self else { return }
@@ -259,7 +285,7 @@ final class AppleOfflineRenderer {
     private let synthesizer = AVSpeechSynthesizer()
 
     func render(
-        chunks: [String],
+        items: [SpeechExportItem],
         voiceIdentifier: String?,
         rate: Float,
         destination: URL,
@@ -268,9 +294,9 @@ final class AppleOfflineRenderer {
         var output: AVAudioFile?
         var renderedAudio = false
 
-        for (index, text) in chunks.enumerated() {
+        for (index, item) in items.enumerated() {
             try Task.checkCancellation()
-            let utterance = AVSpeechUtterance(string: text)
+            let utterance = AVSpeechUtterance(string: item.text)
             utterance.rate = rate
             if let voiceIdentifier {
                 utterance.voice = AVSpeechSynthesisVoice(identifier: voiceIdentifier)
@@ -302,7 +328,14 @@ final class AppleOfflineRenderer {
                     }
                 }
             }
-            progress(index + 1, chunks.count)
+            if item.trailingSilence > 0, let output {
+                try Self.writeSilence(
+                    duration: item.trailingSilence,
+                    format: output.processingFormat,
+                    output: output
+                )
+            }
+            progress(index + 1, items.count)
         }
 
         guard renderedAudio else { throw AudioExportError.noAudio }
@@ -310,5 +343,31 @@ final class AppleOfflineRenderer {
 
     func stop() {
         synthesizer.stopSpeaking(at: .immediate)
+    }
+
+    private static func writeSilence(
+        duration: TimeInterval,
+        format: AVAudioFormat,
+        output: AVAudioFile
+    ) throws {
+        var remaining = AVAudioFrameCount(duration * format.sampleRate)
+        let capacity: AVAudioFrameCount = 8_192
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: capacity) else {
+            throw AudioExportError.noAudio
+        }
+        while remaining > 0 {
+            try Task.checkCancellation()
+            buffer.frameLength = min(capacity, remaining)
+            let audioBuffers = UnsafeMutableAudioBufferListPointer(
+                buffer.mutableAudioBufferList
+            )
+            for audioBuffer in audioBuffers {
+                if let data = audioBuffer.mData {
+                    memset(data, 0, Int(audioBuffer.mDataByteSize))
+                }
+            }
+            try output.write(from: buffer)
+            remaining -= buffer.frameLength
+        }
     }
 }

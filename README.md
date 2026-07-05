@@ -172,9 +172,14 @@ Press Play to read the question. When speech finishes, Audibit starts the
 deck’s recall timer, reveals the answer when answer speech begins, and then
 continues to the next card. The delay defaults to five seconds and can be set
 from 1–60 seconds for each deck. Pausing freezes either speech or the
-countdown. Flashcard decks can be added to existing playlists alongside PDFs,
-presentations, and other documents; repeating the current playlist item
-restarts the complete deck from card one.
+countdown. Enable the repeat button to loop a standalone deck continuously
+from its first question. Flashcard decks can be added to existing playlists
+alongside PDFs, presentations, and other documents; repeating the current
+playlist item restarts the complete deck from card one.
+
+Select a flashcard deck and choose **Export Audio** to create an MP3 using the
+current speech engine, voice, and speed. The exported reading includes each
+deck’s configured silent recall interval between its questions and answers.
 
 Kokoro can be installed or removed from **Settings → Speech**. If its assets
 are unavailable or synthesis fails, Audibit safely falls back to Mac Voices.

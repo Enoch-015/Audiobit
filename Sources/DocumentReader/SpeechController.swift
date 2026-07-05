@@ -254,7 +254,7 @@ final class SpeechController: ObservableObject {
     }
 
     func renderForExport(
-        chunks: [String],
+        items: [SpeechExportItem],
         to destination: URL,
         progress: @escaping @MainActor (Int, Int) -> Void
     ) async throws {
@@ -263,7 +263,7 @@ final class SpeechController: ObservableObject {
         let selectedRate = rate
         if selectedEngine == .kokoro {
             try await kokoroEngine.renderForExport(
-                chunks: chunks,
+                items: items,
                 voiceIdentifier: selectedVoice,
                 rate: selectedRate,
                 destination: destination,
@@ -275,7 +275,7 @@ final class SpeechController: ObservableObject {
             defer { exportRenderer = nil }
             try await withTaskCancellationHandler {
                 try await renderer.render(
-                    chunks: chunks,
+                    items: items,
                     voiceIdentifier: selectedVoice,
                     rate: selectedRate,
                     destination: destination,
