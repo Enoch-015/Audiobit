@@ -113,6 +113,18 @@ final class ReaderPersistence {
         )
     }
 
+    func flashcardLibrary() -> FlashcardLibrary {
+        guard let data = defaults.data(forKey: "flashcardLibrary.v1"),
+              let library = try? JSONDecoder().decode(FlashcardLibrary.self, from: data),
+              library.version == FlashcardLibrary.currentVersion
+        else { return FlashcardLibrary() }
+        return library
+    }
+
+    func saveFlashcardLibrary(_ library: FlashcardLibrary) {
+        defaults.set(try? JSONEncoder().encode(library), forKey: "flashcardLibrary.v1")
+    }
+
     private func sessionKey(_ url: URL) -> String {
         "session." + Data(url.standardizedFileURL.path.utf8).base64EncodedString()
     }

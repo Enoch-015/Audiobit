@@ -6,6 +6,7 @@ struct RootView: View {
     @StateObject private var documents = DocumentController()
     @StateObject private var audioExport = AudioExportController()
     @StateObject private var playlists = PlaylistController()
+    @StateObject private var flashcards = FlashcardController()
     @ObservedObject var speech: SpeechController
     @ObservedObject private var modelManager = KokoroModelManager.shared
     @State private var showImporter = false
@@ -13,6 +14,9 @@ struct RootView: View {
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var activateKokoroAfterInstall = false
     @State private var selectedPlaylistID: UUID?
+    @State private var selectedFlashcardID: UUID?
+    @State private var showFlashcardImporter = false
+    @State private var showFlashcardGuide = false
 
     var body: some View {
         alertLayer
@@ -24,7 +28,11 @@ struct RootView: View {
                 documents: documents,
                 speech: speech,
                 playlists: playlists,
-                selectedPlaylistID: $selectedPlaylistID
+                flashcards: flashcards,
+                selectedPlaylistID: $selectedPlaylistID,
+                selectedFlashcardID: $selectedFlashcardID,
+                showFlashcardImporter: $showFlashcardImporter,
+                showFlashcardGuide: $showFlashcardGuide
             )
                 .navigationSplitViewColumnWidth(min: 190, ideal: 230, max: 300)
         } detail: {
@@ -32,7 +40,10 @@ struct RootView: View {
                 documents: documents,
                 speech: speech,
                 playlists: playlists,
+                flashcards: flashcards,
                 selectedPlaylistID: $selectedPlaylistID,
+                selectedFlashcardID: $selectedFlashcardID,
+                showFlashcardGuide: $showFlashcardGuide,
                 searchText: searchText,
                 openAction: { showImporter = true },
                 backAction: {
@@ -119,9 +130,23 @@ struct RootView: View {
                 openManually(url)
             }
         }
+        .fileImporter(
+            isPresented: $showFlashcardImporter,
+            allowedContentTypes: [.plainText, .data],
+            allowsMultipleSelection: false
+        ) { result in
+            if case .success(let urls) = result, let url = urls.first,
+               let id = flashcards.importDeck(url) {
+                playlists.stopPlayback(clearActivePlaylist: false)
+                selectedPlaylistID = nil
+                showFlashcardGuide = false
+                selectedFlashcardID = id
+            }
+        }
         .onOpenURL { openManually($0) }
         .onAppear {
-            playlists.configure(documents: documents, speech: speech)
+            flashcards.configure(speech: speech)
+            playlists.configure(documents: documents, speech: speech, flashcards: flashcards)
         }
         .onChange(of: documents.content) { _, content in
             guard let content, !playlists.isPlaying else { return }
@@ -173,6 +198,17 @@ struct RootView: View {
         } message: {
             Text(speech.fallbackMessage ?? "")
         }
+        .alert(
+            "Flashcard Deck",
+            isPresented: Binding(
+                get: { flashcards.errorMessage != nil },
+                set: { if !$0 { flashcards.errorMessage = nil } }
+            )
+        ) {
+            Button("OK") { flashcards.errorMessage = nil }
+        } message: {
+            Text(flashcards.errorMessage ?? "")
+        }
         .sheet(isPresented: Binding(
             get: { audioExport.isExporting },
             set: { if !$0 { audioExport.cancel() } }
@@ -211,7 +247,10 @@ struct RootView: View {
 
     private func openManually(_ url: URL) {
         playlists.stopPlayback(clearActivePlaylist: false)
+        flashcards.stop(clearDeck: true)
         selectedPlaylistID = nil
+        selectedFlashcardID = nil
+        showFlashcardGuide = false
         documents.open(url)
     }
 
@@ -262,7 +301,11 @@ private struct SidebarView: View {
     @ObservedObject var documents: DocumentController
     @ObservedObject var speech: SpeechController
     @ObservedObject var playlists: PlaylistController
+    @ObservedObject var flashcards: FlashcardController
     @Binding var selectedPlaylistID: UUID?
+    @Binding var selectedFlashcardID: UUID?
+    @Binding var showFlashcardImporter: Bool
+    @Binding var showFlashcardGuide: Bool
 
     var body: some View {
         List(selection: Binding(
@@ -275,6 +318,11 @@ private struct SidebarView: View {
             Section {
                 ForEach(playlists.playlists) { playlist in
                     Button {
+                        if !playlists.isPlaying {
+                            flashcards.stop()
+                        }
+                        selectedFlashcardID = nil
+                        showFlashcardGuide = false
                         selectedPlaylistID = playlist.id
                     } label: {
                         HStack {
@@ -329,6 +377,74 @@ private struct SidebarView: View {
                 .padding(.vertical, 3)
             }
 
+            Section {
+                Button {
+                    playlists.stopPlayback(clearActivePlaylist: false)
+                    flashcards.stop(clearDeck: true)
+                    selectedPlaylistID = nil
+                    selectedFlashcardID = nil
+                    showFlashcardGuide = true
+                } label: {
+                    Label("Format Guide", systemImage: "questionmark.circle")
+                }
+                .buttonStyle(.plain)
+
+                ForEach(flashcards.decks) { deck in
+                    Button {
+                        playlists.stopPlayback(clearActivePlaylist: false)
+                        selectedPlaylistID = nil
+                        showFlashcardGuide = false
+                        selectedFlashcardID = deck.id
+                    } label: {
+                        HStack {
+                            Label(deck.title, systemImage: "rectangle.on.rectangle")
+                                .lineLimit(1)
+                            Spacer()
+                            Text("\(deck.cards.count)")
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .listRowBackground(
+                        selectedFlashcardID == deck.id
+                            ? Color.accentColor.opacity(0.12)
+                            : Color.clear
+                    )
+                    .contextMenu {
+                        Button("Play") {
+                            selectedFlashcardID = deck.id
+                            flashcards.play(deckID: deck.id)
+                        }
+                        Button("Remove", role: .destructive) {
+                            flashcards.removeDeck(deck.id)
+                            if selectedFlashcardID == deck.id { selectedFlashcardID = nil }
+                        }
+                    }
+                }
+            } header: {
+                HStack {
+                    Text("Flashcards")
+                        .font(.headline)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(.primary)
+                    Spacer()
+                    Button {
+                        showFlashcardImporter = true
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(Color.accentColor)
+                            .frame(width: 26, height: 26)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Import flashcard deck")
+                    .accessibilityLabel("Import flashcard deck")
+                }
+                .padding(.trailing, 8)
+                .padding(.vertical, 3)
+            }
+
             if let content = documents.content {
                 Section("Contents") {
                     ForEach(Array(content.sections.enumerated()), id: \.element.id) { index, section in
@@ -344,6 +460,8 @@ private struct SidebarView: View {
                         Button {
                             playlists.stopPlayback(clearActivePlaylist: false)
                             selectedPlaylistID = nil
+                            selectedFlashcardID = nil
+                            showFlashcardGuide = false
                             documents.open(recent.url)
                         } label: {
                             Label(recent.url.lastPathComponent, systemImage: "doc")
@@ -372,7 +490,10 @@ private struct DetailView: View {
     @ObservedObject var documents: DocumentController
     @ObservedObject var speech: SpeechController
     @ObservedObject var playlists: PlaylistController
+    @ObservedObject var flashcards: FlashcardController
     @Binding var selectedPlaylistID: UUID?
+    @Binding var selectedFlashcardID: UUID?
+    @Binding var showFlashcardGuide: Bool
     let searchText: String
     let openAction: () -> Void
     let backAction: () -> Void
@@ -386,6 +507,7 @@ private struct DetailView: View {
                         playlist: playlist,
                         currentDocumentURL: documents.content?.sourceURL,
                         playlists: playlists,
+                        flashcards: flashcards,
                         playPlaylist: {
                             selectedPlaylistID = nil
                             playlists.play(playlistID: playlist.id)
@@ -394,6 +516,23 @@ private struct DetailView: View {
                             selectedPlaylistID = nil
                             playlists.play(playlistID: playlist.id, itemIndex: index)
                         }
+                    )
+                } else if playlists.isPlaying,
+                          playlists.currentItem?.kind == .flashcardDeck,
+                          let deck = flashcards.activeDeck {
+                    FlashcardDeckView(
+                        deck: deck,
+                        flashcards: flashcards,
+                        playlists: playlists
+                    )
+                } else if showFlashcardGuide {
+                    FlashcardFormatGuide()
+                } else if let deckID = selectedFlashcardID,
+                          let deck = flashcards.decks.first(where: { $0.id == deckID }) {
+                    FlashcardDeckView(
+                        deck: deck,
+                        flashcards: flashcards,
+                        playlists: playlists
                     )
                 } else {
                     switch documents.state {
@@ -420,7 +559,10 @@ private struct DetailView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            if let content = documents.content, selectedPlaylistID == nil {
+            if let content = documents.content,
+               selectedPlaylistID == nil,
+               selectedFlashcardID == nil,
+               !showFlashcardGuide {
                 Divider()
                 PlaybackBar(
                     speech: speech,
@@ -441,14 +583,241 @@ private struct DetailView: View {
     }
 }
 
+private struct FlashcardFormatGuide: View {
+    private let template = """
+    # Optional Deck Title
+
+    ## Question
+    What is polymorphism?
+
+    ## Answer
+    The ability for one interface to represent multiple underlying forms.
+
+    ---
+
+    ## Question
+    What does CPU stand for?
+
+    ## Answer
+    Central Processing Unit.
+    """
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                Label("Flashcard Markdown Format", systemImage: "rectangle.on.rectangle")
+                    .font(.title2.weight(.semibold))
+                Text("Create a Markdown file with paired Question and Answer headings. Separate cards with a horizontal rule.")
+                    .foregroundStyle(.secondary)
+                Text(template)
+                    .font(.system(.body, design: .monospaced))
+                    .textSelection(.enabled)
+                    .padding(.vertical, 8)
+                HStack {
+                    Button("Copy Template") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(template, forType: .string)
+                    }
+                    Spacer()
+                    Text("Answers may span multiple lines.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(maxWidth: 720, alignment: .leading)
+            .padding(32)
+        }
+        .background(Color(nsColor: .textBackgroundColor))
+    }
+}
+
+private struct FlashcardDeckView: View {
+    let deck: FlashcardDeck
+    @ObservedObject var flashcards: FlashcardController
+    @ObservedObject var playlists: PlaylistController
+
+    private var displayedDeck: FlashcardDeck {
+        flashcards.decks.first(where: { $0.id == deck.id }) ?? deck
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 22) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(displayedDeck.title)
+                            .font(.title2.weight(.semibold))
+                        Text("Card \(flashcards.playback.currentCardIndex + 1) of \(displayedDeck.cards.count)")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Menu {
+                        ForEach(playlists.playlists) { playlist in
+                            Button(playlist.name) {
+                                _ = playlists.addFlashcardDeck(displayedDeck, to: playlist.id)
+                            }
+                        }
+                    } label: {
+                        Label("Add to Playlist", systemImage: "text.badge.plus")
+                    }
+                    .disabled(playlists.playlists.isEmpty)
+                }
+
+                Divider()
+
+                Text("Question")
+                    .font(.headline)
+                    .foregroundStyle(.secondary)
+                Text(currentCard?.question ?? "")
+                    .font(.system(size: 25, weight: .medium))
+                    .lineSpacing(6)
+                    .textSelection(.enabled)
+
+                Divider()
+
+                if flashcards.playback.phase == .waiting {
+                    Label(
+                        "Answer in \(flashcards.playback.remainingDelay) seconds",
+                        systemImage: "timer"
+                    )
+                    .font(.headline.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel(
+                        "Answer in \(flashcards.playback.remainingDelay) seconds"
+                    )
+                } else if flashcards.answerIsVisible {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Answer")
+                            .font(.headline)
+                            .foregroundStyle(.secondary)
+                        Text(currentCard?.answer ?? "")
+                            .font(.system(size: 20))
+                            .lineSpacing(5)
+                            .textSelection(.enabled)
+                    }
+                    .transition(.opacity)
+                } else {
+                    Text("The answer will appear when it is read.")
+                        .foregroundStyle(.tertiary)
+                }
+                Spacer()
+            }
+            .frame(maxWidth: 760, alignment: .leading)
+            .padding(30)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            Divider()
+            FlashcardPlaybackBar(
+                deck: displayedDeck,
+                flashcards: flashcards,
+                playlists: playlists
+            )
+        }
+        .background(Color(nsColor: .textBackgroundColor))
+        .onAppear {
+            flashcards.selectDeck(displayedDeck.id)
+        }
+    }
+
+    private var currentCard: Flashcard? {
+        if flashcards.playback.deckID == displayedDeck.id {
+            return flashcards.currentCard
+        }
+        return displayedDeck.cards.first
+    }
+}
+
+private struct FlashcardPlaybackBar: View {
+    let deck: FlashcardDeck
+    @ObservedObject var flashcards: FlashcardController
+    @ObservedObject var playlists: PlaylistController
+
+    var body: some View {
+        HStack(spacing: 14) {
+            if playlists.isPlaying {
+                Button(action: playlists.playPreviousDocument) {
+                    Image(systemName: "backward.end")
+                }
+                .help("Previous playlist item")
+                Button(action: playlists.cycleRepeatMode) {
+                    Image(systemName: playlists.playbackState.repeatMode.systemImage)
+                        .foregroundStyle(
+                            playlists.playbackState.repeatMode == .off ? .secondary : Color.accentColor
+                        )
+                }
+                .help(playlists.playbackState.repeatMode.label)
+                Button(action: playlists.playNextDocument) {
+                    Image(systemName: "forward.end")
+                }
+                .help("Next playlist item")
+                Divider().frame(height: 20)
+            }
+
+            Button(action: flashcards.previousCard) {
+                Image(systemName: "backward.end.fill")
+            }
+            .disabled(flashcards.playback.currentCardIndex == 0)
+            .help("Previous card")
+
+            Button(action: flashcards.togglePlayback) {
+                Image(systemName: flashcards.isPlaying && !flashcards.isPaused ? "pause.fill" : "play.fill")
+                    .frame(width: 18)
+            }
+            .buttonStyle(.borderedProminent)
+            .keyboardShortcut(.space, modifiers: [])
+
+            Button {
+                flashcards.stop()
+            } label: {
+                Image(systemName: "stop.fill")
+            }
+            .disabled(!flashcards.isPlaying)
+            .help("Stop flashcards")
+
+            Button(action: flashcards.nextCard) {
+                Image(systemName: "forward.end.fill")
+            }
+            .disabled(flashcards.playback.currentCardIndex >= deck.cards.count - 1)
+            .help("Next card")
+
+            Slider(
+                value: Binding(
+                    get: { Double(flashcards.playback.currentCardIndex) },
+                    set: { flashcards.moveToCard(Int($0.rounded())) }
+                ),
+                in: 0...Double(max(1, deck.cards.count - 1)),
+                step: 1
+            )
+            .accessibilityLabel("Flashcard position")
+
+            Stepper(
+                "\(deck.answerDelay)s delay",
+                value: Binding(
+                    get: { deck.answerDelay },
+                    set: { flashcards.setDelay($0, for: deck.id) }
+                ),
+                in: 1...60
+            )
+            .frame(width: 130)
+            .accessibilityLabel("Answer delay")
+        }
+        .padding(.horizontal, 16)
+        .frame(height: 56)
+        .background(.bar)
+    }
+}
+
 private struct PlaylistEditorView: View {
     let playlist: DocumentPlaylist
     let currentDocumentURL: URL?
     @ObservedObject var playlists: PlaylistController
+    @ObservedObject var flashcards: FlashcardController
     let playPlaylist: () -> Void
     let playItem: (Int) -> Void
     @State private var name = ""
     @State private var showImporter = false
+    @State private var showFlashcardImporter = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -465,6 +834,12 @@ private struct PlaylistEditorView: View {
                     showImporter = true
                 } label: {
                     Label("Add Documents", systemImage: "plus")
+                }
+
+                Button {
+                    showFlashcardImporter = true
+                } label: {
+                    Label("Add Flashcards", systemImage: "rectangle.on.rectangle.badge.plus")
                 }
 
                 Button {
@@ -505,7 +880,7 @@ private struct PlaylistEditorView: View {
                             Image(systemName: "line.3.horizontal")
                                 .foregroundStyle(.tertiary)
                                 .accessibilityHidden(true)
-                            Image(systemName: "doc.text")
+                            Image(systemName: item.kind == .flashcardDeck ? "rectangle.on.rectangle" : "doc.text")
                                 .foregroundStyle(.secondary)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(item.displayName)
@@ -522,7 +897,7 @@ private struct PlaylistEditorView: View {
                                 Image(systemName: "play.fill")
                             }
                             .buttonStyle(.borderless)
-                            .help("Play this document")
+                            .help("Play this item")
                             .accessibilityLabel("Play \(item.displayName)")
                         }
                         .contentShape(Rectangle())
@@ -562,6 +937,20 @@ private struct PlaylistEditorView: View {
         ) { result in
             if case .success(let urls) = result {
                 _ = playlists.addDocuments(urls, to: playlist.id)
+            }
+        }
+        .fileImporter(
+            isPresented: $showFlashcardImporter,
+            allowedContentTypes: [.plainText, .data],
+            allowsMultipleSelection: true
+        ) { result in
+            if case .success(let urls) = result {
+                for url in urls {
+                    guard let id = flashcards.importDeck(url),
+                          let deck = flashcards.decks.first(where: { $0.id == id })
+                    else { continue }
+                    _ = playlists.addFlashcardDeck(deck, to: playlist.id)
+                }
             }
         }
         .dropDestination(for: URL.self) { urls, _ in

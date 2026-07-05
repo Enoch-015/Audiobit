@@ -3,6 +3,103 @@ import CryptoKit
 import AVFoundation
 import Testing
 @testable import DocumentReader
+
+@Test func flashcardParserReadsTitleAndMultilineCards() throws {
+    let markdown = """
+    # Computer Science
+
+    ## Question
+    What is
+    polymorphism?
+
+    ## Answer
+    One interface representing **multiple forms**.
+
+    ---
+
+    ## Question
+    What does CPU stand for?
+
+    ## Answer
+    Central Processing Unit.
+    """
+    let deck = try FlashcardParser.parse(
+        markdown,
+        sourceURL: URL(fileURLWithPath: "/tmp/cards.md")
+    )
+    #expect(deck.title == "Computer Science")
+    #expect(deck.cards.count == 2)
+    #expect(deck.cards[0].question == "What is\npolymorphism?")
+    #expect(deck.cards[0].answer == "One interface representing multiple forms.")
+}
+
+@Test func flashcardParserReportsMalformedCardNumber() {
+    let markdown = """
+    ## Question
+    Valid?
+    ## Answer
+    Yes.
+    ---
+    ## Question
+    Missing an answer.
+    """
+    #expect(throws: FlashcardParserError.malformed(
+        card: 2,
+        reason: "missing the “## Answer” heading."
+    )) {
+        try FlashcardParser.parse(
+            markdown,
+            sourceURL: URL(fileURLWithPath: "/tmp/cards.md")
+        )
+    }
+}
+
+@Test func legacyPlaylistItemDefaultsToDocumentKind() throws {
+    let id = UUID()
+    let json = """
+    {"id":"\(id.uuidString)","fileURL":"file:///tmp/notes.md","displayName":"Notes"}
+    """
+    let item = try JSONDecoder().decode(PlaylistItem.self, from: Data(json.utf8))
+    #expect(item.kind == .document)
+}
+
+@MainActor
+@Test func flashcardLibraryPersistsDelayAndRefreshesSource() throws {
+    let suite = "FlashcardTests.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suite)!
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let persistence = ReaderPersistence(defaults: defaults)
+    let url = FileManager.default.temporaryDirectory
+        .appendingPathComponent(UUID().uuidString)
+        .appendingPathExtension("md")
+    defer { try? FileManager.default.removeItem(at: url) }
+
+    try """
+    # Study
+    ## Question
+    Original?
+    ## Answer
+    Yes.
+    """.write(to: url, atomically: true, encoding: .utf8)
+
+    let controller = FlashcardController(persistence: persistence)
+    let id = try #require(controller.importDeck(url))
+    controller.setDelay(12, for: id)
+
+    try """
+    # Study
+    ## Question
+    Updated?
+    ## Answer
+    Also yes.
+    """.write(to: url, atomically: true, encoding: .utf8)
+    try controller.refreshDeck(id)
+
+    let restored = FlashcardController(persistence: persistence)
+    let deck = try #require(restored.decks.first)
+    #expect(deck.answerDelay == 12)
+    #expect(deck.cards.first?.question == "Updated?")
+}
 import ZIPFoundation
 
 @Test func supportedTypeDetection() {

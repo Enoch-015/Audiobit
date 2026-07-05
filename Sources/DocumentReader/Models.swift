@@ -57,12 +57,95 @@ struct PlaylistItem: Identifiable, Codable, Hashable, Sendable {
     let id: UUID
     var fileURL: URL
     var displayName: String
+    var kind: PlaylistItemKind
 
-    init(id: UUID = UUID(), fileURL: URL, displayName: String? = nil) {
+    init(
+        id: UUID = UUID(),
+        fileURL: URL,
+        displayName: String? = nil,
+        kind: PlaylistItemKind = .document
+    ) {
         self.id = id
         self.fileURL = fileURL.standardizedFileURL
         self.displayName = displayName ?? fileURL.deletingPathExtension().lastPathComponent
+        self.kind = kind
     }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, fileURL, displayName, kind
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(UUID.self, forKey: .id)
+        fileURL = try values.decode(URL.self, forKey: .fileURL).standardizedFileURL
+        displayName = try values.decode(String.self, forKey: .displayName)
+        kind = try values.decodeIfPresent(PlaylistItemKind.self, forKey: .kind) ?? .document
+    }
+}
+
+enum PlaylistItemKind: String, Codable, Hashable, Sendable {
+    case document
+    case flashcardDeck
+}
+
+struct Flashcard: Identifiable, Codable, Hashable, Sendable {
+    let id: UUID
+    var question: String
+    var answer: String
+
+    init(id: UUID = UUID(), question: String, answer: String) {
+        self.id = id
+        self.question = question
+        self.answer = answer
+    }
+}
+
+struct FlashcardDeck: Identifiable, Codable, Hashable, Sendable {
+    var id: UUID
+    var sourceURL: URL
+    var title: String
+    var cards: [Flashcard]
+    var answerDelay: Int
+    var modificationDate: Date?
+
+    init(
+        id: UUID = UUID(),
+        sourceURL: URL,
+        title: String,
+        cards: [Flashcard],
+        answerDelay: Int = 5,
+        modificationDate: Date? = nil
+    ) {
+        self.id = id
+        self.sourceURL = sourceURL.standardizedFileURL
+        self.title = title
+        self.cards = cards
+        self.answerDelay = min(max(answerDelay, 1), 60)
+        self.modificationDate = modificationDate
+    }
+}
+
+enum FlashcardPlaybackPhase: String, Codable, Sendable {
+    case idle
+    case question
+    case waiting
+    case answer
+    case finished
+}
+
+struct FlashcardPlaybackState: Codable, Equatable, Sendable {
+    var deckID: UUID?
+    var currentCardIndex = 0
+    var phase: FlashcardPlaybackPhase = .idle
+    var remainingDelay = 0
+}
+
+struct FlashcardLibrary: Codable, Sendable {
+    static let currentVersion = 1
+    var version = currentVersion
+    var defaultAnswerDelay = 5
+    var decks: [FlashcardDeck] = []
 }
 
 struct DocumentPlaylist: Identifiable, Codable, Hashable, Sendable {

@@ -33,6 +33,13 @@ final class SpeechController: ObservableObject {
     private var isPreviewing = false
     private var switchTask: Task<Void, Never>?
     private var exportRenderer: AppleOfflineRenderer?
+    private var segmentText: String?
+    private var segmentCompletion: (@MainActor () -> Void)?
+    private var segmentStarted: (@MainActor () -> Void)?
+    private var segmentTask: Task<Void, Never>?
+    private var fallbackSegmentText: String?
+    private var fallbackSegmentCompletion: (@MainActor () -> Void)?
+    private var fallbackSegmentStarted: (@MainActor () -> Void)?
 
     init(modelManager: KokoroModelManager = .shared) {
         self.modelManager = modelManager
@@ -69,6 +76,9 @@ final class SpeechController: ObservableObject {
         preferredVoice: String? = nil,
         completion: (@MainActor () -> Void)? = nil
     ) {
+        let interruptedSegmentText = segmentText
+        let interruptedSegmentStarted = segmentStarted
+        let interruptedSegmentCompletion = segmentCompletion
         switchTask?.cancel()
         stop()
         isPreparing = true
@@ -100,7 +110,15 @@ final class SpeechController: ObservableObject {
                 // completion while `isPreparing` is still true causes
                 // speakCurrent() to reject playlist and repeat transitions.
                 isPreparing = false
-                completion?()
+                if let interruptedSegmentText, let interruptedSegmentCompletion {
+                    playSegment(
+                        interruptedSegmentText,
+                        onStarted: interruptedSegmentStarted,
+                        completion: interruptedSegmentCompletion
+                    )
+                } else {
+                    completion?()
+                }
             } catch is CancellationError {
             } catch {
                 activeEngine = appleEngine
@@ -127,12 +145,59 @@ final class SpeechController: ObservableObject {
     }
 
     func stop() {
+        segmentTask?.cancel()
+        segmentTask = nil
         manualStop = true
         rollingPlaybackActive = false
         isPreviewing = false
         activeEngine.stop()
         isSpeaking = false
         isPaused = false
+        segmentText = nil
+        segmentCompletion = nil
+        segmentStarted = nil
+    }
+
+    func playSegment(
+        _ text: String,
+        onStarted: (@MainActor () -> Void)? = nil,
+        completion: @escaping @MainActor () -> Void
+    ) {
+        stop()
+        segmentText = text
+        segmentStarted = onStarted
+        segmentCompletion = completion
+        manualStop = false
+        segmentTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await self.activeEngine.prepare()
+                try Task.checkCancellation()
+                try await self.activeEngine.play(
+                    text: text,
+                    voiceIdentifier: self.voiceIdentifier,
+                    rate: self.rate
+                )
+            } catch is CancellationError {
+            } catch {
+                self.handleEngineFailure(error.localizedDescription)
+            }
+        }
+    }
+
+    func pauseSegment() {
+        activeEngine.pause()
+        isPaused = true
+    }
+
+    func resumeSegment() {
+        activeEngine.resume()
+        isPaused = false
+        isSpeaking = true
+    }
+
+    func stopSegment() {
+        stop()
     }
 
     func moveToSection(_ index: Int, autoplay: Bool = false) {
@@ -173,7 +238,17 @@ final class SpeechController: ObservableObject {
 
     func continueWithAppleVoice() {
         switchEngine(to: .apple) { [weak self] in
-            self?.speakCurrent()
+            guard let self else { return }
+            if let text = self.fallbackSegmentText,
+               let completion = self.fallbackSegmentCompletion {
+                let started = self.fallbackSegmentStarted
+                self.fallbackSegmentText = nil
+                self.fallbackSegmentCompletion = nil
+                self.fallbackSegmentStarted = nil
+                self.playSegment(text, onStarted: started, completion: completion)
+            } else {
+                self.speakCurrent()
+            }
         }
         fallbackMessage = nil
     }
@@ -262,6 +337,17 @@ final class SpeechController: ObservableObject {
     }
 
     private func finishedChunk() {
+        if segmentText != nil {
+            let completion = segmentCompletion
+            segmentTask = nil
+            segmentText = nil
+            segmentCompletion = nil
+            segmentStarted = nil
+            isSpeaking = false
+            isPaused = false
+            completion?()
+            return
+        }
         if isPreviewing {
             isPreviewing = false
             isSpeaking = false
@@ -291,8 +377,14 @@ final class SpeechController: ObservableObject {
 
     private func handleEngineFailure(_ message: String) {
         let failedKind = engineKind
+        let interruptedText = segmentText
+        let interruptedCompletion = segmentCompletion
+        let interruptedStarted = segmentStarted
         stop()
         if failedKind == .kokoro {
+            fallbackSegmentText = interruptedText
+            fallbackSegmentCompletion = interruptedCompletion
+            fallbackSegmentStarted = interruptedStarted
             activeEngine = appleEngine
             engineKind = .apple
             voices = appleEngine.voices
@@ -311,6 +403,9 @@ final class SpeechController: ObservableObject {
             case .started:
                 self.isSpeaking = true
                 self.isPaused = false
+                let started = self.segmentStarted
+                self.segmentStarted = nil
+                started?()
             case .chunkStarted(let index):
                 guard self.chunks.indices.contains(index) else { return }
                 self.chunkIndex = index
@@ -329,6 +424,21 @@ final class SpeechController: ObservableObject {
         guard previousValue != rate else { return }
         guard shouldRestartPlayback else { return }
 
+        if let segmentText, let segmentCompletion {
+            let segmentStarted = self.segmentStarted
+            activeEngine.stop()
+            isSpeaking = false
+            isPaused = false
+            self.segmentText = nil
+            self.segmentCompletion = nil
+            self.segmentStarted = nil
+            playSegment(
+                segmentText,
+                onStarted: segmentStarted,
+                completion: segmentCompletion
+            )
+            return
+        }
         stop()
         speakCurrent()
     }
@@ -337,6 +447,21 @@ final class SpeechController: ObservableObject {
         guard previousValue != voiceIdentifier else { return }
         guard shouldRestartPlayback else { return }
 
+        if let segmentText, let segmentCompletion {
+            let segmentStarted = self.segmentStarted
+            activeEngine.stop()
+            isSpeaking = false
+            isPaused = false
+            self.segmentText = nil
+            self.segmentCompletion = nil
+            self.segmentStarted = nil
+            playSegment(
+                segmentText,
+                onStarted: segmentStarted,
+                completion: segmentCompletion
+            )
+            return
+        }
         stop()
         speakCurrent()
     }

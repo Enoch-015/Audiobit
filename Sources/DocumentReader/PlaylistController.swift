@@ -28,6 +28,7 @@ final class PlaylistController: ObservableObject {
     private var playbackTask: Task<Void, Never>?
     private weak var documents: DocumentController?
     private weak var speech: SpeechController?
+    private weak var flashcards: FlashcardController?
 
     init(persistence: ReaderPersistence = .shared) {
         self.persistence = persistence
@@ -49,10 +50,18 @@ final class PlaylistController: ObservableObject {
         return items[playbackState.currentItemIndex]
     }
 
-    func configure(documents: DocumentController, speech: SpeechController) {
+    func configure(
+        documents: DocumentController,
+        speech: SpeechController,
+        flashcards: FlashcardController
+    ) {
         self.documents = documents
         self.speech = speech
+        self.flashcards = flashcards
         speech.documentFinishedHandler = { [weak self] in
+            self?.documentDidFinishNaturally()
+        }
+        flashcards.deckFinishedHandler = { [weak self] in
             self?.documentDidFinishNaturally()
         }
     }
@@ -104,6 +113,25 @@ final class PlaylistController: ObservableObject {
         playlists[playlistIndex].updatedAt = .now
         persist()
         return additions.count
+    }
+
+    @discardableResult
+    func addFlashcardDeck(_ deck: FlashcardDeck, to playlistID: UUID) -> Bool {
+        guard let playlistIndex = index(of: playlistID) else { return false }
+        let path = deck.sourceURL.standardizedFileURL.path
+        guard !playlists[playlistIndex].items.contains(where: {
+            $0.kind == .flashcardDeck && $0.fileURL.standardizedFileURL.path == path
+        }) else { return false }
+        playlists[playlistIndex].items.append(
+            PlaylistItem(
+                fileURL: deck.sourceURL,
+                displayName: deck.title,
+                kind: .flashcardDeck
+            )
+        )
+        playlists[playlistIndex].updatedAt = .now
+        persist()
+        return true
     }
 
     func moveItems(in playlistID: UUID, from offsets: IndexSet, to destination: Int) {
@@ -179,6 +207,7 @@ final class PlaylistController: ObservableObject {
         playbackTask = nil
         isPlaying = false
         speech?.stop()
+        flashcards?.stop()
         if clearActivePlaylist {
             playbackState.activePlaylistID = nil
             playbackState.currentItemIndex = 0
@@ -204,14 +233,14 @@ final class PlaylistController: ObservableObject {
 
     private func playAvailableItem(startingAt start: Int, mayWrap: Bool) {
         playbackTask?.cancel()
-        guard let documents, let speech, let playlist = activePlaylist else {
+        guard let documents, let speech, let flashcards, let playlist = activePlaylist else {
             isPlaying = false
             return
         }
         let playlistID = playlist.id
         let itemCount = playlist.items.count
-        playbackTask = Task { [weak self, weak documents, weak speech] in
-            guard let self, let documents, let speech else { return }
+        playbackTask = Task { [weak self, weak documents, weak speech, weak flashcards] in
+            guard let self, let documents, let speech, let flashcards else { return }
             var index = start
             var attempted = 0
             var skipped: [String] = []
@@ -224,23 +253,33 @@ final class PlaylistController: ObservableObject {
                 else { return }
                 let item = currentPlaylist.items[index]
                 do {
-                    let content = try await documents.openForPlaylist(item.fileURL)
-                    try Task.checkCancellation()
                     self.playbackState.currentItemIndex = index
                     self.isPlaying = true
                     self.persist()
-                    let session = ReadingSession(
-                        sectionIndex: 0,
-                        speechRate: speech.rate,
-                        voiceIdentifier: speech.voiceIdentifier,
-                        speechEngine: speech.engineKind
-                    )
-                    speech.load(
-                        content,
-                        sectionIndex: 0,
-                        session: session,
-                        autoplay: true
-                    )
+                    if item.kind == .flashcardDeck {
+                        speech.stop()
+                        let deckID = flashcards.decks.first {
+                            $0.sourceURL.standardizedFileURL == item.fileURL.standardizedFileURL
+                        }?.id ?? flashcards.importDeck(item.fileURL)
+                        guard let deckID else { throw FlashcardParserError.unreadable }
+                        try flashcards.refreshAndPlay(deckID: deckID)
+                    } else {
+                        flashcards.stop()
+                        let content = try await documents.openForPlaylist(item.fileURL)
+                        try Task.checkCancellation()
+                        let session = ReadingSession(
+                            sectionIndex: 0,
+                            speechRate: speech.rate,
+                            voiceIdentifier: speech.voiceIdentifier,
+                            speechEngine: speech.engineKind
+                        )
+                        speech.load(
+                            content,
+                            sectionIndex: 0,
+                            session: session,
+                            autoplay: true
+                        )
+                    }
                     if !skipped.isEmpty {
                         self.skippedMessage = Self.skippedSummary(skipped)
                     }

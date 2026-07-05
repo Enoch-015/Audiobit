@@ -39,6 +39,8 @@ Requires macOS 15 or newer on Apple Silicon.
   drag and drop, and **Open With** support.
 - Persistent named playlists with drag reordering, automatic document
   transitions, an Up Next menu, and document or playlist repeat modes.
+- Timed Markdown flashcard decks that read each question, pause for recall,
+  reveal the answer as it is spoken, and work inside mixed playlists.
 - Light mode, dark mode, keyboard navigation, VoiceOver labels, and native
   accessibility behavior.
 
@@ -134,6 +136,46 @@ bottom bar provides previous/next-document controls, an Up Next menu, and
 repeat modes for the current document or complete playlist. Unavailable files
 are skipped and reported without interrupting the remaining queue.
 
+### Flashcard decks
+
+Select **Flashcards → +** to import a `.md` or `.markdown` deck. Flashcard
+imports remain linked to their original files, so edits are picked up the next
+time the deck starts. Moving or deleting a source file makes it unavailable;
+playlist playback skips it and reports the issue.
+
+Use this format:
+
+```markdown
+# Optional Deck Title
+
+## Question
+What is polymorphism?
+
+## Answer
+The ability for one interface to represent multiple underlying forms.
+
+---
+
+## Question
+What does CPU stand for?
+
+## Answer
+Central Processing Unit.
+```
+
+Every card must contain one `## Question` followed by one `## Answer`, and
+cards must be separated by `---`. Questions and answers may span multiple
+lines. Audibit reports the number and cause of malformed cards. The in-app
+**Format Guide** includes a copyable template.
+
+Press Play to read the question. When speech finishes, Audibit starts the
+deck’s recall timer, reveals the answer when answer speech begins, and then
+continues to the next card. The delay defaults to five seconds and can be set
+from 1–60 seconds for each deck. Pausing freezes either speech or the
+countdown. Flashcard decks can be added to existing playlists alongside PDFs,
+presentations, and other documents; repeating the current playlist item
+restarts the complete deck from card one.
+
 Kokoro can be installed or removed from **Settings → Speech**. If its assets
 are unavailable or synthesis fails, Audibit safely falls back to Mac Voices.
 
@@ -226,7 +268,8 @@ swift test
 The tests cover supported-type detection, PDF visual spacing, PowerPoint
 extraction, text chunking, session compatibility, Kokoro asset verification,
 playlist persistence and repeat navigation, unique export naming, and real MP3
-encoding.
+encoding. Flashcard tests cover Markdown parsing, multiline content, malformed
+card diagnostics, and backward-compatible playlist item decoding.
 
 ## Architecture
 
@@ -248,6 +291,9 @@ Audibit uses small, explicit layers:
 - `PlaylistController` persists named document queues and coordinates
   extraction, document transitions, skipped items, and repeat behavior above
   the speech engines.
+- `FlashcardParser` validates the Markdown deck format, while
+  `FlashcardController` owns imported deck references, timed question/answer
+  playback, countdown state, and playlist completion.
 
 ## Local data
 
@@ -263,6 +309,7 @@ Removing the enhanced voice from Settings deletes its downloaded model assets.
   supported.
 - Complex multi-column PDFs depend on the reading order exposed by PDFKit.
 - OCR quality depends on source resolution and scan clarity.
+- Flashcard playback is sequential; shuffle and scoring are not included.
 - Development DMGs are not notarized without external Apple Developer
   credentials.
 
