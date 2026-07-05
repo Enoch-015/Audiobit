@@ -257,6 +257,25 @@ Each successful `main` workflow uses an increasing numeric bundle build,
 creates a signed DMG and appcast, and replaces the stable release assets only
 after validation succeeds. Failed or cancelled builds are never advertised.
 
+### Release version numbering
+
+Every push to `main` receives a distinct visible version in the form
+`major.minor.run`, such as `1.1.14`. The final component is GitHub’s increasing
+workflow run number, so the app, Sparkle appcast, release title, and release
+notes no longer remain at `1.1.0`.
+
+The release line defaults to `1.1`. To move future automatic builds to another
+line:
+
+1. Open **Settings → Secrets and variables → Actions → Variables** in GitHub.
+2. Create or update `AUDIBIT_VERSION_LINE`.
+3. Set it to a two-component value such as `1.2` or `2.0`.
+
+The next push will then publish as `1.2.<run>` or `2.0.<run>`. The
+**Run workflow** form also accepts a one-run `version_line` override for
+testing or an exceptional release; it does not change the persistent
+repository variable. Invalid values fail before packaging or publishing.
+
 ## Tests
 
 Run the full suite with:

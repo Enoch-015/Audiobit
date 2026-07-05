@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      version_line:
+        description: "Optional one-run version line override (for example 1.2 or 2.0)"
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -47,9 +52,15 @@ jobs:
         run: swift test
 
       - name: Prepare release metadata
+        env:
+          VERSION_LINE: ${{ inputs.version_line || vars.AUDIBIT_VERSION_LINE || '1.1' }}
         run: |
+          if ! [[ "$VERSION_LINE" =~ ^[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Version line must contain major.minor only, such as 1.2 or 2.0."
+            exit 1
+          fi
           echo "AUDIBIT_BUILD_NUMBER=$((100000 + GITHUB_RUN_NUMBER))" >> "$GITHUB_ENV"
-          echo "AUDIBIT_SHORT_VERSION=1.1.0" >> "$GITHUB_ENV"
+          echo "AUDIBIT_SHORT_VERSION=${VERSION_LINE}.${GITHUB_RUN_NUMBER}" >> "$GITHUB_ENV"
           echo "AUDIBIT_SOURCE_COMMIT=$GITHUB_SHA" >> "$GITHUB_ENV"
 
       - name: Build production DMG
@@ -58,6 +69,7 @@ jobs:
       - name: Verify package metadata
         run: |
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' .build/app/Audibit.app/Contents/Info.plist)" = "$AUDIBIT_BUILD_NUMBER"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' .build/app/Audibit.app/Contents/Info.plist)" = "$AUDIBIT_SHORT_VERSION"
           test "$(/usr/libexec/PlistBuddy -c 'Print :AudibitSourceCommit' .build/app/Audibit.app/Contents/Info.plist)" = "${{ github.sha }}"
           codesign --verify --deep --strict .build/app/Audibit.app
           hdiutil verify dist/Audibit.dmg
@@ -76,7 +88,8 @@ jobs:
           chmod 600 "$KEY_FILE"
           cp dist/Audibit.dmg "$UPDATE_DIR/Audibit.dmg"
           cp dist/Audibit.dmg.sha256 "$UPDATE_DIR/Audibit.dmg.sha256"
-          git log -1 --pretty='format:# Audibit 1.1.0 (%H)%n%n%s%n%n%b' > "$UPDATE_DIR/Audibit.md"
+          printf '# Audibit %s (%s)\n\n' "$AUDIBIT_SHORT_VERSION" "$GITHUB_SHA" > "$UPDATE_DIR/Audibit.md"
+          git log -1 --pretty='format:%s%n%n%b' >> "$UPDATE_DIR/Audibit.md"
           SPARKLE_ROOT=$(find .build/artifacts -path '*/Sparkle/bin/generate_appcast' -print -quit)
           test -x "$SPARKLE_ROOT"
           "$SPARKLE_ROOT" \
@@ -101,6 +114,11 @@ jobs:
               --target "$GITHUB_SHA" \
               --title "Audibit — Latest Main Build" \
               --notes "Automatically published after a successful main-branch test and build."
+          else
+            # This is intentionally a rolling release. Move its tag so GitHub's
+            # generated source archives match the commit that built the DMG.
+            git tag --force latest-main "$GITHUB_SHA"
+            git push origin refs/tags/latest-main --force
           fi
           gh release upload latest-main \
             "$UPDATE_DIR/Audibit.dmg" \
@@ -109,5 +127,5 @@ jobs:
             --clobber
           gh release upload latest-main "$UPDATE_DIR/appcast.xml" --clobber
           gh release edit latest-main \
-            --title "Audibit 1.1.0 ($AUDIBIT_BUILD_NUMBER)" \
+            --title "Audibit $AUDIBIT_SHORT_VERSION (build $AUDIBIT_BUILD_NUMBER)" \
             --notes-file "$UPDATE_DIR/Audibit.md"

@@ -14,7 +14,7 @@ swift build -c release
 APP="$ROOT/.build/app/Audibit.app"
 CONTENTS="$APP/Contents"
 BUILD_NUMBER=${AUDIBIT_BUILD_NUMBER:-$(git rev-list --count HEAD)}
-SHORT_VERSION=${AUDIBIT_SHORT_VERSION:-1.1.0}
+SHORT_VERSION=${AUDIBIT_SHORT_VERSION:-1.1.$(git rev-list --count HEAD)}
 SOURCE_COMMIT=${AUDIBIT_SOURCE_COMMIT:-$(git rev-parse HEAD)}
 SPARKLE_FRAMEWORK=$(find "$ROOT/.build/artifacts" -path '*/Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework' -print -quit)
 
